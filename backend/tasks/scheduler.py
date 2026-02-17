@@ -51,21 +51,28 @@ async def run_morning_push(industry_id: int) -> None:
             return
 
         source_dicts = [
-            {"url": s.url, "name": s.name, "weight": s.weight, "keywords": s.keywords}
+            {
+                "id": s.id,
+                "url": s.url,
+                "name": s.name,
+                "weight": s.weight,
+                "keywords": s.keywords,
+                "link_selector": s.link_selector,
+            }
             for s in sources
         ]
 
-    # 采集 → 去重 → 打分
-    try:
-        raw_items = await crawl_sources(source_dicts)
-        deduped = deduplicate(raw_items)
-        top_items = score_and_rank(deduped, top_n=industry.top_n)
-        await send_morning_report(
-            smtp_cfg, recipients, industry.name, top_items,
-            contact_email=smtp_cfg.contact_email or smtp_cfg.username,
-        )
-    except Exception as e:
-        logger.exception("行业 %s 早报推送失败: %s", industry.name, e)
+        # 采集 → 去重 → 打分（db session 保持打开，供爬虫写入 SeenArticle）
+        try:
+            raw_items = await crawl_sources(source_dicts, db)
+            deduped = deduplicate(raw_items)
+            top_items = score_and_rank(deduped, top_n=industry.top_n)
+            await send_morning_report(
+                smtp_cfg, recipients, industry.name, top_items,
+                contact_email=smtp_cfg.contact_email or smtp_cfg.username,
+            )
+        except Exception as e:
+            logger.exception("行业 %s 早报推送失败: %s", industry.name, e)
 
 
 async def run_evening_push(industry_id: int) -> None:

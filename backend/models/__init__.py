@@ -4,6 +4,7 @@ from backend.models.finance_item import FinanceItem
 from backend.models.recipient import Recipient
 from backend.models.smtp_config import SmtpConfig
 from backend.models.push_schedule import PushSchedule
+from backend.models.seen_article import SeenArticle
 
 __all__ = [
     "Industry",
@@ -12,4 +13,5 @@ __all__ = [
     "Recipient",
     "SmtpConfig",
     "PushSchedule",
+    "SeenArticle",
 ]

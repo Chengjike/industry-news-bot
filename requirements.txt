@@ -10,8 +10,9 @@ aiosqlite==0.20.0
 starlette-admin==0.14.1
 itsdangerous==2.2.0
 
-# RSS crawling
+# RSS crawling（保留 feedparser 备用，主爬虫改为 HTML 抓取）
 feedparser==6.0.11
+beautifulsoup4==4.12.3
 
 # Semantic deduplication
 semhash==0.3.0

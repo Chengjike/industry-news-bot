@@ -89,11 +89,17 @@ class IndustryView(ModelView):
 class NewsSourceView(ModelView):
     name = "新闻源"
     label = "新闻源管理"
-    icon = "fa fa-rss"
+    icon = "fa fa-newspaper"
     fields = [
         IntegerField("id", label="ID", exclude_from_create=True, exclude_from_edit=True),
         StringField("name", label="来源名称", required=True),
-        StringField("url", label="RSS 地址", required=True),
+        StringField("url", label="新闻列表页地址", required=True),
+        StringField(
+            "link_selector",
+            label="链接选择器（CSS）",
+            required=False,
+            hint="留空默认 'a'；示例：'.article-list a' 或 'a.news-title'",
+        ),
         IntegerField("weight", label="权重 (1-10)"),
         TextAreaField("keywords", label="关键词 (+必须 !排除 普通)", required=False),
         IntegerField("industry_id", label="所属行业 ID", required=True),

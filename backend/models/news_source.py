@@ -17,6 +17,7 @@ class NewsSource(Base):
     industry_id: Mapped[int] = mapped_column(ForeignKey("industry.id"), nullable=False)
     name: Mapped[str] = mapped_column(String(200), nullable=False)
     url: Mapped[str] = mapped_column(String(500), nullable=False)
+    link_selector: Mapped[Optional[str]] = mapped_column(String(200), nullable=True)  # CSS 选择器，如 'a.title'，留空则用 'a'
     weight: Mapped[int] = mapped_column(Integer, default=5)  # 1-10
     keywords: Mapped[Optional[str]] = mapped_column(Text, nullable=True)  # "+必须词 !排除词 普通词"
     created_at: Mapped[datetime] = mapped_column(DateTime, server_default=func.now())

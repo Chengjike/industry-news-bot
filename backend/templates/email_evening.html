@@ -1,0 +1,76 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>{{ industry_name }} 行业晚报</title>
+<style>
+  body { font-family: -apple-system, "PingFang SC", "Microsoft YaHei", sans-serif; background: #f5f5f5; margin: 0; padding: 0; }
+  .container { max-width: 680px; margin: 24px auto; background: #fff; border-radius: 8px; overflow: hidden; box-shadow: 0 2px 8px rgba(0,0,0,.08); }
+  .header { background: #0e7490; color: #fff; padding: 28px 32px; }
+  .header h1 { margin: 0; font-size: 22px; font-weight: 600; }
+  .header p { margin: 6px 0 0; font-size: 13px; opacity: .85; }
+  .content { padding: 24px 32px; }
+  h2 { font-size: 15px; color: #374151; margin: 20px 0 10px; border-left: 3px solid #0e7490; padding-left: 10px; }
+  table { width: 100%; border-collapse: collapse; font-size: 14px; }
+  th { background: #f0f9ff; text-align: left; padding: 10px 12px; color: #374151; font-weight: 600; border-bottom: 2px solid #bae6fd; }
+  td { padding: 10px 12px; border-bottom: 1px solid #f0f0f0; color: #4b5563; }
+  .up { color: #dc2626; font-weight: 600; }
+  .down { color: #16a34a; font-weight: 600; }
+  .flat { color: #6b7280; }
+  .footer { background: #fafafa; border-top: 1px solid #f0f0f0; padding: 16px 32px; font-size: 12px; color: #999; }
+  .footer a { color: #999; }
+</style>
+</head>
+<body>
+<div class="container">
+  <div class="header">
+    <h1>📈 {{ industry_name }} 行业晚报</h1>
+    <p>今日行情数据 · 数据来源 AKShare</p>
+  </div>
+  <div class="content">
+    {% set stocks = quotes | selectattr("item_type", "equalto", "stock") | list %}
+    {% set futures = quotes | selectattr("item_type", "equalto", "futures") | list %}
+
+    {% if stocks %}
+    <h2>行业龙头股价</h2>
+    <table>
+      <tr><th>名称</th><th>代码</th><th>最新价</th><th>涨跌幅</th></tr>
+      {% for q in stocks %}
+      <tr>
+        <td>{{ q.name }}</td>
+        <td>{{ q.symbol }}</td>
+        <td>{{ "%.2f" | format(q.price) }}</td>
+        <td class="{% if q.change_pct > 0 %}up{% elif q.change_pct < 0 %}down{% else %}flat{% endif %}">
+          {% if q.change_pct > 0 %}+{% endif %}{{ "%.2f" | format(q.change_pct) }}%
+        </td>
+      </tr>
+      {% endfor %}
+    </table>
+    {% endif %}
+
+    {% if futures %}
+    <h2>大宗商品行情</h2>
+    <table>
+      <tr><th>品种</th><th>代码</th><th>最新价</th><th>涨跌幅</th></tr>
+      {% for q in futures %}
+      <tr>
+        <td>{{ q.name }}</td>
+        <td>{{ q.symbol }}</td>
+        <td>{{ "%.2f" | format(q.price) }}</td>
+        <td class="{% if q.change_pct > 0 %}up{% elif q.change_pct < 0 %}down{% else %}flat{% endif %}">
+          {% if q.change_pct > 0 %}+{% endif %}{{ "%.2f" | format(q.change_pct) }}%
+        </td>
+      </tr>
+      {% endfor %}
+    </table>
+    {% endif %}
+  </div>
+  <div class="footer">
+    行情数据仅供参考，不构成投资建议。数据来源：AKShare 开源库。<br>
+    如有侵权请联系：<a href="mailto:{{ contact_email }}">{{ contact_email }}</a>&nbsp;|&nbsp;
+    如需退订请回复本邮件并注明"退订"。
+  </div>
+</div>
+</body>
+</html>

@@ -1,0 +1,43 @@
+fastapi==0.115.6
+uvicorn[standard]==0.32.1
+
+# Database
+sqlalchemy==2.0.36
+alembic==1.14.0
+aiosqlite==0.20.0
+
+# Admin UI
+starlette-admin==0.14.1
+
+# RSS crawling
+feedparser==6.0.11
+
+# Semantic deduplication
+semhash==0.3.0
+
+# Financial data
+akshare==1.18.25
+
+# Email
+fastapi-mail==1.4.1
+jinja2==3.1.4
+
+# Scheduling
+apscheduler==3.10.4
+
+# Encryption & Security
+cryptography==43.0.3
+bcrypt==4.2.1
+httpx==0.28.1
+
+# Config
+python-dotenv==1.0.1
+pydantic-settings==2.7.0
+
+# Testing
+pytest==8.3.4
+pytest-asyncio==0.24.0
+pytest-mock==3.14.0
+
+# Dev tools
+pip-audit==2.7.3

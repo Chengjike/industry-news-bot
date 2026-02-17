@@ -8,6 +8,8 @@ DEPLOY_PATH=${1:-/opt/news-bot}
 
 echo ">>> 创建应用目录"
 mkdir -p "$DEPLOY_PATH"/{data,logs}
+# 容器以 uid 1000 运行，确保有写权限
+chown -R 1000:1000 "$DEPLOY_PATH/data" "$DEPLOY_PATH/logs"
 
 echo ">>> 克隆仓库（如未存在）"
 if [ ! -d "$DEPLOY_PATH/.git" ]; then

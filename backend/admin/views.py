@@ -14,8 +14,6 @@ from starlette_admin.fields import (
 from backend.config import settings
 from backend.database import engine
 from backend.models import Industry, NewsSource, FinanceItem, Recipient, SmtpConfig, PushSchedule
-
-
 # ────────────────────────────────────────
 # 认证 Provider（单管理员账号）
 # ────────────────────────────────────────
@@ -46,8 +44,6 @@ class SingleAdminAuthProvider(AuthProvider):
     async def logout(self, request: Request, response: Response) -> Response:
         request.session.clear()
         return response
-
-
 # ────────────────────────────────────────
 # ModelView 定义
 # ────────────────────────────────────────
@@ -84,8 +80,6 @@ class IndustryView(ModelView):
         for pk in pks:
             await run_evening_push(int(pk))
         return f"已触发 {len(pks)} 个行业的晚报推送"
-
-
 class NewsSourceView(ModelView):
     name = "新闻源"
     label = "新闻源管理"
@@ -94,18 +88,11 @@ class NewsSourceView(ModelView):
         IntegerField("id", label="ID", exclude_from_create=True, exclude_from_edit=True),
         StringField("name", label="来源名称", required=True),
         StringField("url", label="新闻列表页地址", required=True),
-        StringField(
-            "link_selector",
-            label="链接选择器（CSS）",
-            required=False,
-            hint="留空默认 'a'；示例：'.article-list a' 或 'a.news-title'",
-        ),
+        StringField("link_selector", label="链接选择器（CSS，留空默认 'a'）", required=False),
         IntegerField("weight", label="权重 (1-10)"),
         TextAreaField("keywords", label="关键词 (+必须 !排除 普通)", required=False),
         IntegerField("industry_id", label="所属行业 ID", required=True),
     ]
-
-
 class FinanceItemView(ModelView):
     name = "金融项"
     label = "金融数据管理"
@@ -121,8 +108,6 @@ class FinanceItemView(ModelView):
         ),
         IntegerField("industry_id", label="所属行业 ID", required=True),
     ]
-
-
 class RecipientView(ModelView):
     name = "收件人"
     label = "收件人管理"
@@ -133,8 +118,6 @@ class RecipientView(ModelView):
         EmailField("email", label="邮箱", required=True),
         IntegerField("industry_id", label="所属行业 ID", required=True),
     ]
-
-
 class SmtpConfigView(ModelView):
     name = "SMTP配置"
     label = "SMTP 配置"
@@ -155,16 +138,12 @@ class SmtpConfigView(ModelView):
 
     async def before_edit(self, request: Request, data: dict, obj: SmtpConfig) -> None:
         _encrypt_smtp_password(data, obj)
-
-
 def _encrypt_smtp_password(data: dict, obj: SmtpConfig) -> None:
     """如果密码字段不为空且未加密，则 Fernet 加密后写入 obj"""
     from backend.utils.crypto import encrypt
     raw = data.get("password_encrypted", "")
     if raw and not raw.startswith("gAAAAA"):  # Fernet token 特征前缀
         obj.password_encrypted = encrypt(raw)
-
-
 class PushScheduleView(ModelView):
     name = "推送计划"
     label = "推送计划"
@@ -181,8 +160,6 @@ class PushScheduleView(ModelView):
         IntegerField("minute", label="分钟 (0-59)"),
         BooleanField("enabled", label="启用"),
     ]
-
-
 def create_admin() -> Admin:
     admin = Admin(
         engine,

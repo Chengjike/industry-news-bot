@@ -1,15 +1,17 @@
 """邮件发送模块 - 使用 fastapi-mail"""
 import logging
 from pathlib import Path
+from typing import Optional
 
 from fastapi_mail import ConnectionConfig, FastMail, MessageSchema, MessageType
-from pydantic import EmailStr
+from jinja2 import Environment, FileSystemLoader
 
 from backend.utils.crypto import decrypt
 
 logger = logging.getLogger(__name__)
 
 TEMPLATE_DIR = Path(__file__).parent.parent / "templates"
+_jinja_env = Environment(loader=FileSystemLoader(str(TEMPLATE_DIR)))
 
 
 def _build_connection(smtp_cfg) -> ConnectionConfig:
@@ -36,11 +38,20 @@ async def send_morning_report(
     industry_name: str,
     news_items: list,
     contact_email: str = "",
-) -> None:
-    """发送早报"""
+) -> Optional[str]:
+    """发送早报，返回渲染后的 HTML（用于推送记录快照）；无新闻时返回 None"""
     if not news_items:
         logger.info("行业 %s 无新闻，跳过早报", industry_name)
-        return
+        return None
+
+    template_vars = {
+        "industry_name": industry_name,
+        "news_items": news_items,
+        "contact_email": contact_email or smtp_cfg.username,
+    }
+
+    # 渲染 HTML 快照（存档用）
+    html_snapshot = _jinja_env.get_template("email_morning.html").render(**template_vars)
 
     conf = _build_connection(smtp_cfg)
     fm = FastMail(conf)
@@ -48,16 +59,13 @@ async def send_morning_report(
     message = MessageSchema(
         subject=f"【{industry_name}】行业早报 - 今日要闻",
         recipients=recipients,
-        template_body={
-            "industry_name": industry_name,
-            "news_items": news_items,
-            "contact_email": contact_email or smtp_cfg.username,
-        },
+        template_body=template_vars,
         subtype=MessageType.html,
     )
 
     await fm.send_message(message, template_name="email_morning.html")
     logger.info("早报已发送至 %d 位收件人（行业: %s）", len(recipients), industry_name)
+    return html_snapshot
 
 
 async def send_evening_report(
@@ -66,11 +74,20 @@ async def send_evening_report(
     industry_name: str,
     quotes: list,
     contact_email: str = "",
-) -> None:
-    """发送晚报"""
+) -> Optional[str]:
+    """发送晚报，返回渲染后的 HTML（用于推送记录快照）；无数据时返回 None"""
     if not quotes:
         logger.info("行业 %s 无金融数据，跳过晚报", industry_name)
-        return
+        return None
+
+    template_vars = {
+        "industry_name": industry_name,
+        "quotes": quotes,
+        "contact_email": contact_email or smtp_cfg.username,
+    }
+
+    # 渲染 HTML 快照（存档用）
+    html_snapshot = _jinja_env.get_template("email_evening.html").render(**template_vars)
 
     conf = _build_connection(smtp_cfg)
     fm = FastMail(conf)
@@ -78,13 +95,10 @@ async def send_evening_report(
     message = MessageSchema(
         subject=f"【{industry_name}】行业晚报 - 今日行情",
         recipients=recipients,
-        template_body={
-            "industry_name": industry_name,
-            "quotes": quotes,
-            "contact_email": contact_email or smtp_cfg.username,
-        },
+        template_body=template_vars,
         subtype=MessageType.html,
     )
 
     await fm.send_message(message, template_name="email_evening.html")
     logger.info("晚报已发送至 %d 位收件人（行业: %s）", len(recipients), industry_name)
+    return html_snapshot

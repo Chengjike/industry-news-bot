@@ -4,10 +4,11 @@ import os
 from contextlib import asynccontextmanager
 
 from fastapi import FastAPI
+from fastapi.responses import HTMLResponse
 from starlette.middleware.sessions import SessionMiddleware
 
 from backend.config import settings
-from backend.database import init_db
+from backend.database import init_db, AsyncSessionLocal
 from backend.tasks.scheduler import scheduler, reload_schedules
 from backend.utils.log_sanitizer import setup_log_sanitizer
 
@@ -51,3 +52,19 @@ admin.mount_to(app)
 @app.get("/health")
 async def health():
     return {"status": "ok"}
+
+
+@app.get("/push-log/{log_id}/preview", response_class=HTMLResponse)
+async def push_log_preview(log_id: int):
+    """返回推送记录的邮件 HTML 快照（运维预览用）"""
+    from backend.models.push_log import PushLog
+    async with AsyncSessionLocal() as db:
+        log = await db.get(PushLog, log_id)
+    if not log:
+        return HTMLResponse("<p style='font-family:sans-serif;padding:2rem'>未找到该推送记录</p>", status_code=404)
+    if not log.html_snapshot:
+        return HTMLResponse(
+            f"<p style='font-family:sans-serif;padding:2rem'>"
+            f"记录 #{log_id} 无 HTML 快照（状态：{log.status}，原因：{log.error_msg or '无'}）</p>"
+        )
+    return HTMLResponse(log.html_snapshot)

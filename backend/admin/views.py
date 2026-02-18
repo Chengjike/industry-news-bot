@@ -8,12 +8,13 @@ from starlette_admin.auth import AdminUser, AuthProvider
 from starlette_admin.exceptions import LoginFailed
 from starlette_admin.fields import (
     EmailField, IntegerField, StringField, TextAreaField,
-    BooleanField, EnumField, PasswordField,
+    BooleanField, EnumField, PasswordField, DateTimeField,
 )
 
 from backend.config import settings
 from backend.database import engine
 from backend.models import Industry, NewsSource, FinanceItem, Recipient, SmtpConfig, PushSchedule
+from backend.models.push_log import PushLog
 # ────────────────────────────────────────
 # 认证 Provider（单管理员账号）
 # ────────────────────────────────────────
@@ -60,26 +61,44 @@ class IndustryView(ModelView):
     @action(
         name="send_morning",
         text="发送今日早报",
-        confirmation="确认立即触发该行业早报推送？",
+        confirmation="确认立即触发该行业早报推送？推送结果可在【推送记录】页面查看。",
         submit_btn_text="确认发送",
+        submit_btn_class="btn-primary",
     )
     async def send_morning_action(self, request: Request, pks: list) -> str:
         from backend.tasks.scheduler import run_morning_push
         for pk in pks:
-            await run_morning_push(int(pk))
-        return f"已触发 {len(pks)} 个行业的早报推送"
+            await run_morning_push(int(pk), triggered_by="manual")
+        return f"已触发 {len(pks)} 个行业的早报推送，请前往【推送记录】页面查看推送结果及内容"
 
     @action(
         name="send_evening",
         text="发送今日晚报",
-        confirmation="确认立即触发该行业晚报推送？",
+        confirmation="确认立即触发该行业晚报推送？推送结果可在【推送记录】页面查看。",
         submit_btn_text="确认发送",
+        submit_btn_class="btn-primary",
     )
     async def send_evening_action(self, request: Request, pks: list) -> str:
         from backend.tasks.scheduler import run_evening_push
         for pk in pks:
-            await run_evening_push(int(pk))
-        return f"已触发 {len(pks)} 个行业的晚报推送"
+            await run_evening_push(int(pk), triggered_by="manual")
+        return f"已触发 {len(pks)} 个行业的晚报推送，请前往【推送记录】页面查看推送结果及内容"
+
+    @action(
+        name="reset_seen",
+        text="重置已见文章（重新采集）",
+        confirmation="确认清空该行业的已见文章记录？\n清空后下次推送将把当前网站上的所有文章视为新文章重新采集推送。",
+        submit_btn_text="确认重置",
+        submit_btn_class="btn-warning",
+    )
+    async def reset_seen_action(self, request: Request, pks: list) -> str:
+        from backend.tasks.scheduler import reset_seen_articles
+        total = 0
+        for pk in pks:
+            total += await reset_seen_articles(int(pk))
+        return f"已清空 {len(pks)} 个行业的已见文章记录（共 {total} 条），下次推送将重新采集所有文章"
+
+
 class NewsSourceView(ModelView):
     name = "新闻源"
     label = "新闻源管理"
@@ -93,6 +112,8 @@ class NewsSourceView(ModelView):
         TextAreaField("keywords", label="关键词 (+必须 !排除 普通)", required=False),
         IntegerField("industry_id", label="所属行业 ID", required=True),
     ]
+
+
 class FinanceItemView(ModelView):
     name = "金融项"
     label = "金融数据管理"
@@ -108,6 +129,8 @@ class FinanceItemView(ModelView):
         ),
         IntegerField("industry_id", label="所属行业 ID", required=True),
     ]
+
+
 class RecipientView(ModelView):
     name = "收件人"
     label = "收件人管理"
@@ -118,6 +141,8 @@ class RecipientView(ModelView):
         EmailField("email", label="邮箱", required=True),
         IntegerField("industry_id", label="所属行业 ID", required=True),
     ]
+
+
 class SmtpConfigView(ModelView):
     name = "SMTP配置"
     label = "SMTP 配置"
@@ -126,11 +151,11 @@ class SmtpConfigView(ModelView):
         IntegerField("id", label="ID", exclude_from_create=True, exclude_from_edit=True),
         StringField("host", label="SMTP 服务器", required=True),
         IntegerField("port", label="端口"),
-        StringField("username", label="账号", required=True),
-        PasswordField("password_encrypted", label="密码（保存时自动加密）", required=True),
+        StringField("username", label="账号（需含@域名）", required=True),
+        PasswordField("password_encrypted", label="密码/授权码（保存时自动加密）", required=True),
         StringField("sender_name", label="发件人名称"),
         EmailField("contact_email", label="侵权联系邮箱"),
-        BooleanField("use_tls", label="使用 SSL/TLS"),
+        BooleanField("use_tls", label="使用 SSL/TLS（465端口请开启）"),
     ]
 
     async def before_create(self, request: Request, data: dict, obj: SmtpConfig) -> None:
@@ -138,12 +163,8 @@ class SmtpConfigView(ModelView):
 
     async def before_edit(self, request: Request, data: dict, obj: SmtpConfig) -> None:
         _encrypt_smtp_password(data, obj)
-def _encrypt_smtp_password(data: dict, obj: SmtpConfig) -> None:
-    """如果密码字段不为空且未加密，则 Fernet 加密后写入 obj"""
-    from backend.utils.crypto import encrypt
-    raw = data.get("password_encrypted", "")
-    if raw and not raw.startswith("gAAAAA"):  # Fernet token 特征前缀
-        obj.password_encrypted = encrypt(raw)
+
+
 class PushScheduleView(ModelView):
     name = "推送计划"
     label = "推送计划"
@@ -160,6 +181,75 @@ class PushScheduleView(ModelView):
         IntegerField("minute", label="分钟 (0-59)"),
         BooleanField("enabled", label="启用"),
     ]
+
+
+class PushLogView(ModelView):
+    """推送记录（只读）"""
+    name = "推送记录"
+    label = "推送记录"
+    icon = "fa fa-history"
+    can_create = False
+    can_edit = False
+    fields = [
+        IntegerField("id", label="ID"),
+        IntegerField("industry_id", label="行业 ID"),
+        EnumField(
+            "push_type", label="类型",
+            choices=[("morning", "早报"), ("evening", "晚报")],
+        ),
+        EnumField(
+            "status", label="状态",
+            choices=[("success", "成功"), ("failed", "失败"), ("skipped", "跳过")],
+        ),
+        IntegerField("article_count", label="推送文章数"),
+        IntegerField("recipient_count", label="收件人数"),
+        EnumField(
+            "triggered_by", label="触发方式",
+            choices=[("scheduler", "定时任务"), ("manual", "手动触发")],
+        ),
+        StringField("error_msg", label="跳过/失败原因"),
+        DateTimeField("created_at", label="推送时间"),
+    ]
+
+    @action(
+        name="view_html",
+        text="查看推送内容",
+        confirmation="将在新窗口打开推送邮件内容预览，每次只能查看一条记录。",
+        submit_btn_text="查看",
+        submit_btn_class="btn-info",
+    )
+    async def view_html_action(self, request: Request, pks: list) -> str:
+        if len(pks) != 1:
+            return "请只选择一条记录"
+        log_id = pks[0]
+        return f"推送内容预览地址（请在浏览器中打开）：/push-log/{log_id}/preview"
+
+    @action(
+        name="delete_selected",
+        text="删除所选记录",
+        confirmation="确认删除所选推送记录？此操作不可恢复。",
+        submit_btn_text="确认删除",
+        submit_btn_class="btn-danger",
+    )
+    async def delete_selected_action(self, request: Request, pks: list) -> str:
+        from backend.database import AsyncSessionLocal
+        from sqlalchemy import delete as sql_delete
+        async with AsyncSessionLocal() as db:
+            await db.execute(
+                sql_delete(PushLog).where(PushLog.id.in_([int(pk) for pk in pks]))
+            )
+            await db.commit()
+        return f"已删除 {len(pks)} 条推送记录"
+
+
+def _encrypt_smtp_password(data: dict, obj: SmtpConfig) -> None:
+    """如果密码字段不为空且未加密，则 Fernet 加密后写入 obj"""
+    from backend.utils.crypto import encrypt
+    raw = data.get("password_encrypted", "")
+    if raw and not raw.startswith("gAAAAA"):  # Fernet token 特征前缀
+        obj.password_encrypted = encrypt(raw)
+
+
 def create_admin() -> Admin:
     admin = Admin(
         engine,
@@ -172,4 +262,5 @@ def create_admin() -> Admin:
     admin.add_view(RecipientView(Recipient))
     admin.add_view(SmtpConfigView(SmtpConfig))
     admin.add_view(PushScheduleView(PushSchedule))
+    admin.add_view(PushLogView(PushLog))
     return admin

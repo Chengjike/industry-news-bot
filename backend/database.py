@@ -26,7 +26,7 @@ async def get_db():
 
 
 async def init_db():
-    from backend.models import industry, news_source, finance_item, recipient, smtp_config, seen_article  # noqa: F401
+    from backend.models import industry, news_source, finance_item, recipient, smtp_config, seen_article, push_log  # noqa: F401
     async with engine.begin() as conn:
         await conn.run_sync(Base.metadata.create_all)
 

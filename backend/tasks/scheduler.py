@@ -3,10 +3,11 @@ import logging
 
 from apscheduler.schedulers.asyncio import AsyncIOScheduler
 from apscheduler.triggers.cron import CronTrigger
-from sqlalchemy import select
+from sqlalchemy import select, delete
 
 from backend.database import AsyncSessionLocal
-from backend.models import Industry, NewsSource, FinanceItem, Recipient, SmtpConfig, PushSchedule
+from backend.models import Industry, NewsSource, FinanceItem, Recipient, SmtpConfig, PushSchedule, SeenArticle
+from backend.models.push_log import PushLog
 from backend.services.news_crawler import crawl_sources
 from backend.services.news_deduplication import deduplicate
 from backend.services.news_ranking import score_and_rank
@@ -18,7 +19,7 @@ logger = logging.getLogger(__name__)
 scheduler = AsyncIOScheduler(timezone="Asia/Shanghai")
 
 
-async def run_morning_push(industry_id: int) -> None:
+async def run_morning_push(industry_id: int, triggered_by: str = "scheduler") -> None:
     """早报推送任务"""
     async with AsyncSessionLocal() as db:
         industry = await db.get(Industry, industry_id)
@@ -32,6 +33,11 @@ async def run_morning_push(industry_id: int) -> None:
         sources = sources_result.scalars().all()
         if not sources:
             logger.info("行业 %s 无新闻源，跳过早报", industry.name)
+            db.add(PushLog(
+                industry_id=industry_id, push_type="morning", status="skipped",
+                error_msg="未配置新闻源", triggered_by=triggered_by,
+            ))
+            await db.commit()
             return
 
         # 获取收件人
@@ -41,6 +47,11 @@ async def run_morning_push(industry_id: int) -> None:
         recipients = [r.email for r in recip_result.scalars().all()]
         if not recipients:
             logger.info("行业 %s 无收件人，跳过早报", industry.name)
+            db.add(PushLog(
+                industry_id=industry_id, push_type="morning", status="skipped",
+                error_msg="未配置收件人", triggered_by=triggered_by,
+            ))
+            await db.commit()
             return
 
         # 获取 SMTP 配置
@@ -48,6 +59,11 @@ async def run_morning_push(industry_id: int) -> None:
         smtp_cfg = smtp_result.scalar_one_or_none()
         if not smtp_cfg:
             logger.error("未配置 SMTP，跳过早报")
+            db.add(PushLog(
+                industry_id=industry_id, push_type="morning", status="skipped",
+                error_msg="未配置 SMTP", triggered_by=triggered_by,
+            ))
+            await db.commit()
             return
 
         source_dicts = [
@@ -67,15 +83,32 @@ async def run_morning_push(industry_id: int) -> None:
             raw_items = await crawl_sources(source_dicts, db)
             deduped = deduplicate(raw_items)
             top_items = score_and_rank(deduped, top_n=industry.top_n)
-            await send_morning_report(
+            html_snapshot = await send_morning_report(
                 smtp_cfg, recipients, industry.name, top_items,
                 contact_email=smtp_cfg.contact_email or smtp_cfg.username,
             )
+            status = "success" if html_snapshot else "skipped"
+            error_msg = None if html_snapshot else "无新增文章（所有文章已在历史记录中）"
+            db.add(PushLog(
+                industry_id=industry_id, push_type="morning", status=status,
+                article_count=len(top_items), recipient_count=len(recipients),
+                error_msg=error_msg, html_snapshot=html_snapshot, triggered_by=triggered_by,
+            ))
+            await db.commit()
         except Exception as e:
             logger.exception("行业 %s 早报推送失败: %s", industry.name, e)
+            try:
+                db.add(PushLog(
+                    industry_id=industry_id, push_type="morning", status="failed",
+                    recipient_count=len(recipients), error_msg=str(e)[:1000],
+                    triggered_by=triggered_by,
+                ))
+                await db.commit()
+            except Exception:
+                pass
 
 
-async def run_evening_push(industry_id: int) -> None:
+async def run_evening_push(industry_id: int, triggered_by: str = "scheduler") -> None:
     """晚报推送任务"""
     async with AsyncSessionLocal() as db:
         industry = await db.get(Industry, industry_id)
@@ -88,6 +121,11 @@ async def run_evening_push(industry_id: int) -> None:
         finance_items = fi_result.scalars().all()
         if not finance_items:
             logger.info("行业 %s 无金融项，跳过晚报", industry.name)
+            db.add(PushLog(
+                industry_id=industry_id, push_type="evening", status="skipped",
+                error_msg="未配置金融数据项", triggered_by=triggered_by,
+            ))
+            await db.commit()
             return
 
         recip_result = await db.execute(
@@ -95,26 +133,72 @@ async def run_evening_push(industry_id: int) -> None:
         )
         recipients = [r.email for r in recip_result.scalars().all()]
         if not recipients:
+            db.add(PushLog(
+                industry_id=industry_id, push_type="evening", status="skipped",
+                error_msg="未配置收件人", triggered_by=triggered_by,
+            ))
+            await db.commit()
             return
 
         smtp_result = await db.execute(select(SmtpConfig).limit(1))
         smtp_cfg = smtp_result.scalar_one_or_none()
         if not smtp_cfg:
+            db.add(PushLog(
+                industry_id=industry_id, push_type="evening", status="skipped",
+                error_msg="未配置 SMTP", triggered_by=triggered_by,
+            ))
+            await db.commit()
             return
 
         items_dicts = [
             {"symbol": fi.symbol, "name": fi.name, "item_type": fi.item_type}
             for fi in finance_items
         ]
+        # 提前读取需要在 session 外使用的属性
+        industry_name = industry.name
+        contact_email = smtp_cfg.contact_email or smtp_cfg.username
 
-    try:
-        quotes = await fetch_quotes(items_dicts)
-        await send_evening_report(
-            smtp_cfg, recipients, industry.name, quotes,
-            contact_email=smtp_cfg.contact_email or smtp_cfg.username,
+        try:
+            quotes = await fetch_quotes(items_dicts)
+            html_snapshot = await send_evening_report(
+                smtp_cfg, recipients, industry_name, quotes,
+                contact_email=contact_email,
+            )
+            status = "success" if html_snapshot else "skipped"
+            error_msg = None if html_snapshot else "无金融行情数据"
+            db.add(PushLog(
+                industry_id=industry_id, push_type="evening", status=status,
+                article_count=len(quotes), recipient_count=len(recipients),
+                error_msg=error_msg, html_snapshot=html_snapshot, triggered_by=triggered_by,
+            ))
+            await db.commit()
+        except Exception as e:
+            logger.exception("行业 %s 晚报推送失败: %s", industry_name, e)
+            try:
+                db.add(PushLog(
+                    industry_id=industry_id, push_type="evening", status="failed",
+                    recipient_count=len(recipients), error_msg=str(e)[:1000],
+                    triggered_by=triggered_by,
+                ))
+                await db.commit()
+            except Exception:
+                pass
+
+
+async def reset_seen_articles(industry_id: int) -> int:
+    """清空行业新闻源的已见文章记录，返回删除条数"""
+    async with AsyncSessionLocal() as db:
+        sources_result = await db.execute(
+            select(NewsSource.id).where(NewsSource.industry_id == industry_id)
         )
-    except Exception as e:
-        logger.exception("行业 %s 晚报推送失败: %s", industry.name, e)
+        source_ids = [row[0] for row in sources_result]
+        if not source_ids:
+            return 0
+        result = await db.execute(
+            delete(SeenArticle).where(SeenArticle.source_id.in_(source_ids))
+        )
+        await db.commit()
+        return result.rowcount
 
 
 async def reload_schedules() -> None:

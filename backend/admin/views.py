@@ -188,8 +188,13 @@ class PushLogView(ModelView):
     name = "推送记录"
     label = "推送记录"
     icon = "fa fa-history"
-    can_create = False
-    can_edit = False
+
+    def can_create(self, request: Request) -> bool:
+        return False
+
+    def can_edit(self, request: Request) -> bool:
+        return False
+
     fields = [
         IntegerField("id", label="ID"),
         IntegerField("industry_id", label="行业 ID"),

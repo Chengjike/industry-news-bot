@@ -146,10 +146,19 @@ def _extract_summary(html: str, max_chars: int = 140) -> str:
 
         for p in paragraphs:
             p_text = p.get_text(strip=True)
-            # 过滤过短、纯符号、版权声明等无关段落
+            # 过滤过短、纯符号、导航/版权声明等无关段落
             if len(p_text) < 10:
                 continue
-            if any(keyword in p_text for keyword in ["版权所有", "转载请注明", "相关阅读", "点击进入"]):
+            # 扩展过滤关键词：导航、版权、功能链接等
+            skip_keywords = [
+                "版权所有", "转载请注明", "相关阅读", "点击进入",
+                "网站地图", "关于我们", "English", "联系我们",
+                "免责声明", "隐私政策", "订阅", "分享到",
+            ]
+            if any(keyword in p_text for keyword in skip_keywords):
+                continue
+            # 过滤纯链接文本（连续多个 | 分隔符）
+            if p_text.count("|") >= 3:
                 continue
 
             text_parts.append(p_text)

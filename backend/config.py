@@ -14,7 +14,7 @@ class Settings(BaseSettings):
     fernet_key: str = ""
     database_url: str = "sqlite+aiosqlite:///./data/app.db"
     log_level: str = "INFO"
-    anthropic_api_key: str = ""  # Claude API key for AI summary generation
+    dashscope_api_key: str = ""  # 阿里云通义千问 API key，用于 AI 摘要生成
 
 
 settings = Settings()

@@ -33,7 +33,7 @@ bcrypt==4.2.1
 httpx==0.28.1
 
 # AI Summary Generation
-anthropic==0.43.0
+dashscope==1.20.11
 
 # Config
 python-dotenv==1.0.1

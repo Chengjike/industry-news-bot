@@ -1,9 +1,10 @@
-"""AI 摘要生成模块 - 使用 Claude API 生成高质量新闻摘要"""
+"""AI 摘要生成模块 - 使用阿里云通义千问 API 生成高质量新闻摘要"""
 import logging
 from typing import Optional
 
-from anthropic import AsyncAnthropic
 from bs4 import BeautifulSoup
+import dashscope
+from dashscope import Generation
 
 from backend.config import settings
 
@@ -91,7 +92,7 @@ def _extract_article_text(html: str) -> str:
 
 async def generate_summary_with_ai(html: str, max_chars: int = 140) -> str:
     """
-    使用 Claude API 阅读全文后生成高质量摘要。
+    使用阿里云通义千问 API 阅读全文后生成高质量摘要。
 
     Args:
         html: 文章详情页 HTML
@@ -100,8 +101,8 @@ async def generate_summary_with_ai(html: str, max_chars: int = 140) -> str:
     Returns:
         AI 生成的摘要文本，失败时返回空字符串
     """
-    if not settings.anthropic_api_key:
-        logger.debug("未配置 ANTHROPIC_API_KEY，跳过 AI 摘要生成")
+    if not settings.dashscope_api_key:
+        logger.debug("未配置 DASHSCOPE_API_KEY，跳过 AI 摘要生成")
         return ""
 
     try:
@@ -115,18 +116,18 @@ async def generate_summary_with_ai(html: str, max_chars: int = 140) -> str:
             return ""
 
         # 限制输入长度（避免超过 API 限制和成本）
-        # Claude Haiku 支持 200K tokens，约 15 万汉字
-        # 为平衡质量和成本，限制在 2 万字（约 20 篇新闻的总和）
+        # 通义千问 qwen-turbo 支持 8K tokens，约 6000 汉字
+        # 为平衡质量和成本，限制在 5000 字
         original_length = len(full_text)
-        if len(full_text) > 20000:
-            # 取前 10000 字 + 后 10000 字（保留开头和结尾的关键信息）
-            full_text = full_text[:10000] + "\n\n[中间部分省略]\n\n" + full_text[-10000:]
-            logger.debug("文章过长（%d 字），截取前后各 10000 字", original_length)
+        if len(full_text) > 5000:
+            # 取前 2500 字 + 后 2500 字（保留开头和结尾的关键信息）
+            full_text = full_text[:2500] + "\n\n[中间部分省略]\n\n" + full_text[-2500:]
+            logger.debug("文章过长（%d 字），截取前后各 2500 字", original_length)
 
-        logger.debug("提取正文长度: %d 字，准备调用 Claude API 生成摘要", len(full_text))
+        logger.debug("提取正文长度: %d 字，准备调用通义千问 API 生成摘要", len(full_text))
 
-        # 调用 Claude API 生成摘要
-        client = AsyncAnthropic(api_key=settings.anthropic_api_key)
+        # 配置 API Key
+        dashscope.api_key = settings.dashscope_api_key
 
         prompt = f"""请仔细阅读以下新闻文章的完整内容，然后生成一段精炼的摘要。
 
@@ -140,14 +141,19 @@ async def generate_summary_with_ai(html: str, max_chars: int = 140) -> str:
 文章正文：
 {full_text}"""
 
-        message = await client.messages.create(
-            model="claude-3-5-haiku-20241022",
+        # 调用通义千问 API（同步调用，dashscope 暂不支持异步）
+        response = Generation.call(
+            model='qwen-turbo',
+            prompt=prompt,
             max_tokens=400,
             temperature=0.3,
-            messages=[{"role": "user", "content": prompt}]
         )
 
-        summary = message.content[0].text.strip()
+        if response.status_code != 200:
+            logger.warning("通义千问 API 调用失败: %s", response.message)
+            return ""
+
+        summary = response.output.text.strip()
 
         # 移除可能的前缀
         for prefix in ["摘要：", "摘要:", "本文", "文章", "新闻"]:

@@ -124,11 +124,7 @@ def _extract_summary(html: str, max_chars: int = 140) -> str:
     try:
         soup = BeautifulSoup(html, "html.parser")
 
-        # 移除无关标签（script、style、nav、footer 等）
-        for tag in soup(["script", "style", "nav", "footer", "aside", "header"]):
-            tag.decompose()
-
-        # 优先查找主内容区域
+        # 优先查找主内容区域（在删除标签之前查找）
         content_area = None
         for selector in ["article", "main", ".content", ".article-content", "#content", ".post-content"]:
             content_area = soup.select_one(selector)
@@ -139,8 +135,12 @@ def _extract_summary(html: str, max_chars: int = 140) -> str:
         if not content_area:
             content_area = soup.find("body") or soup
 
-        # 提取所有段落文本
-        paragraphs = content_area.find_all("p")
+        # 移除无关标签（在选定区域内删除）
+        for tag in content_area(["script", "style", "nav", "footer", "aside"]):
+            tag.decompose()
+
+        # 提取所有段落文本（递归查找）
+        paragraphs = content_area.find_all("p", recursive=True)
         text_parts: list[str] = []
         total_len = 0
 

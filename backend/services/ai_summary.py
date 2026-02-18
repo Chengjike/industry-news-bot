@@ -109,7 +109,8 @@ async def generate_summary_with_ai(html: str, max_chars: int = 140) -> str:
         full_text = _extract_article_text(html)
 
         # 过滤过短的文本（可能是导航页或错误页）
-        if len(full_text) < 200:
+        # 降低阈值到 100 字，因为很多新闻网站的文章提取后可能只有几百字
+        if len(full_text) < 100:
             logger.debug("文章正文过短（%d 字），跳过 AI 摘要", len(full_text))
             return ""
 

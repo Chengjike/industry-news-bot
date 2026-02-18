@@ -32,6 +32,9 @@ cryptography==43.0.3
 bcrypt==4.2.1
 httpx==0.28.1
 
+# AI Summary Generation
+anthropic==0.43.0
+
 # Config
 python-dotenv==1.0.1
 pydantic-settings==2.7.0

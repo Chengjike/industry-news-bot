@@ -14,6 +14,7 @@ class Settings(BaseSettings):
     fernet_key: str = ""
     database_url: str = "sqlite+aiosqlite:///./data/app.db"
     log_level: str = "INFO"
+    anthropic_api_key: str = ""  # Claude API key for AI summary generation
 
 
 settings = Settings()

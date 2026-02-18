@@ -185,13 +185,25 @@ async def _fetch_article_summary(
     """
     请求文章详情页并提取摘要。
 
+    优先使用 AI 生成高质量摘要（需配置 ANTHROPIC_API_KEY），
+    失败时降级为简单文本提取。
+
     使用 Semaphore 限制并发数，避免同时发起过多请求。
     失败时返回空字符串，不阻塞主流程。
     """
     async with semaphore:
         try:
             html = await _fetch_page(client, url)
-            return _extract_summary(html, max_chars)
+
+            # 优先尝试 AI 摘要生成
+            from backend.services.ai_summary import generate_summary_with_ai
+            summary = await generate_summary_with_ai(html, max_chars)
+
+            # AI 失败时降级为简单提取
+            if not summary:
+                summary = _extract_summary(html, max_chars)
+
+            return summary
         except Exception as e:
             logger.debug("获取摘要失败 [%s]: %s", url, e)
             return ""

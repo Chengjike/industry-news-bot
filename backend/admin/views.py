@@ -216,6 +216,28 @@ class PushLogView(ModelView):
         DateTimeField("created_at", label="推送时间"),
     ]
 
+    def get_list_columns(self):
+        """自定义列表页显示的列，添加预览链接"""
+        columns = super().get_list_columns()
+        # 在 ID 列后插入预览链接列
+        columns.insert(1, {
+            "label": "预览",
+            "name": "_preview_link",
+            "searchable": False,
+            "sortable": False,
+        })
+        return columns
+
+    async def serialize_field_value(self, obj, field_name: str, request):
+        """自定义字段序列化，为预览链接列生成 HTML"""
+        if field_name == "_preview_link":
+            if obj.html_snapshot:
+                preview_url = f"/push-log/{obj.id}/preview"
+                return f'<a href="{preview_url}" target="_blank" class="btn btn-sm btn-info">查看内容</a>'
+            else:
+                return '<span class="text-muted">无快照</span>'
+        return await super().serialize_field_value(obj, field_name, request)
+
     @action(
         name="view_html",
         text="查看推送内容",

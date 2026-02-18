@@ -4,7 +4,8 @@
 1. httpx 请求新闻列表页（支持 SSRF 防护）
 2. BeautifulSoup 按 CSS 选择器提取文章链接
 3. 对比数据库 SeenArticle 表，找出新增文章
-4. 将新文章 URL 写入 SeenArticle，避免下次重复推送
+4. 批量请求文章详情页，提取前 140 字作为摘要
+5. 将新文章 URL 写入 SeenArticle，避免下次重复推送
 """
 import asyncio
 import logging
@@ -43,6 +44,7 @@ class NewsItem:
     source_name: str
     source_weight: int
     keywords: Optional[str] = None
+    summary: str = ""        # 文章摘要（不超过 140 字）
 
 
 def _extract_links(html: str, base_url: str, selector: str) -> list[tuple[str, str]]:
@@ -109,6 +111,83 @@ async def _fetch_page(client: httpx.AsyncClient, url: str) -> str:
     return resp.text
 
 
+def _extract_summary(html: str, max_chars: int = 140) -> str:
+    """
+    从文章详情页 HTML 提取摘要（前 140 字正文）。
+
+    策略：
+    1. 优先从 article/main/.content 等容器中查找段落
+    2. 过滤导航、版权声明等无关内容
+    3. 拼接段落文本直到达到字数限制
+    4. 返回截断后的文本（不超过 max_chars 字符）
+    """
+    try:
+        soup = BeautifulSoup(html, "html.parser")
+
+        # 移除无关标签（script、style、nav、footer 等）
+        for tag in soup(["script", "style", "nav", "footer", "aside", "header"]):
+            tag.decompose()
+
+        # 优先查找主内容区域
+        content_area = None
+        for selector in ["article", "main", ".content", ".article-content", "#content", ".post-content"]:
+            content_area = soup.select_one(selector)
+            if content_area:
+                break
+
+        # 如果找不到主内容区，就从整个 body 中提取
+        if not content_area:
+            content_area = soup.find("body") or soup
+
+        # 提取所有段落文本
+        paragraphs = content_area.find_all("p")
+        text_parts: list[str] = []
+        total_len = 0
+
+        for p in paragraphs:
+            p_text = p.get_text(strip=True)
+            # 过滤过短、纯符号、版权声明等无关段落
+            if len(p_text) < 10:
+                continue
+            if any(keyword in p_text for keyword in ["版权所有", "转载请注明", "相关阅读", "点击进入"]):
+                continue
+
+            text_parts.append(p_text)
+            total_len += len(p_text)
+            if total_len >= max_chars:
+                break
+
+        summary = "".join(text_parts)
+        if len(summary) > max_chars:
+            summary = summary[:max_chars] + "..."
+
+        return summary
+    except Exception as e:
+        logger.debug("摘要提取失败: %s", e)
+        return ""
+
+
+async def _fetch_article_summary(
+    client: httpx.AsyncClient,
+    url: str,
+    semaphore: asyncio.Semaphore,
+    max_chars: int = 140,
+) -> str:
+    """
+    请求文章详情页并提取摘要。
+
+    使用 Semaphore 限制并发数，避免同时发起过多请求。
+    失败时返回空字符串，不阻塞主流程。
+    """
+    async with semaphore:
+        try:
+            html = await _fetch_page(client, url)
+            return _extract_summary(html, max_chars)
+        except Exception as e:
+            logger.debug("获取摘要失败 [%s]: %s", url, e)
+            return ""
+
+
 async def _crawl_one_source(
     client: httpx.AsyncClient,
     db: AsyncSession,
@@ -121,8 +200,9 @@ async def _crawl_one_source(
     1. 请求新闻列表页
     2. 用 CSS 选择器提取候选链接
     3. 批量查询 SeenArticle 表，过滤掉已见过的 URL
-    4. 将新 URL 写入 SeenArticle
-    5. 返回新文章
+    4. 并发请求新文章详情页，提取摘要
+    5. 将新 URL 写入 SeenArticle
+    6. 返回新文章（含摘要）
     """
     url = source["url"]
     name = source["name"]
@@ -144,13 +224,30 @@ async def _crawl_one_source(
     )
     seen_urls = {row[0] for row in existing_result}
 
+    # 筛选出新文章
+    new_articles: list[tuple[str, str]] = [
+        (title, article_url)
+        for title, article_url in candidate_links
+        if article_url not in seen_urls
+    ]
+
+    if not new_articles:
+        return []
+
+    # 并发请求新文章详情页提取摘要（限制并发数为 5，避免触发反爬）
+    semaphore = asyncio.Semaphore(5)
+    summary_tasks = [
+        _fetch_article_summary(client, article_url, semaphore)
+        for _, article_url in new_articles
+    ]
+    summaries = await asyncio.gather(*summary_tasks)
+
+    # 构建 NewsItem 和 SeenArticle 记录
     now = datetime.now(timezone.utc)
     new_items: list[NewsItem] = []
     new_records: list[SeenArticle] = []
 
-    for title, article_url in candidate_links:
-        if article_url in seen_urls:
-            continue
+    for (title, article_url), summary in zip(new_articles, summaries):
         new_items.append(NewsItem(
             title=title,
             url=article_url,
@@ -158,6 +255,7 @@ async def _crawl_one_source(
             source_name=name,
             source_weight=weight,
             keywords=keywords,
+            summary=summary,
         ))
         new_records.append(SeenArticle(
             url=article_url,

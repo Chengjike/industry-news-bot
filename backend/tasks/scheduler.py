@@ -1,5 +1,6 @@
 """APScheduler 定时任务配置"""
 import logging
+from datetime import datetime, timezone
 
 from apscheduler.schedulers.asyncio import AsyncIOScheduler
 from apscheduler.triggers.cron import CronTrigger
@@ -92,7 +93,6 @@ async def run_morning_push(industry_id: int, triggered_by: str = "scheduler") ->
 
             # 推送成功后，将本次推送的文章写入 SeenArticle（避免重复推送）
             if html_snapshot and top_items:
-                from datetime import datetime, timezone
                 now = datetime.now(timezone.utc)
                 seen_records = [
                     SeenArticle(

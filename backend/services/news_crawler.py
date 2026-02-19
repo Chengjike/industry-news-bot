@@ -221,10 +221,9 @@ async def _crawl_one_source(
     流程：
     1. 请求新闻列表页
     2. 用 CSS 选择器提取候选链接
-    3. 批量查询 SeenArticle 表，过滤掉已见过的 URL
+    3. 批量查询 SeenArticle 表，过滤掉已推送过的 URL
     4. 并发请求新文章详情页，提取摘要
-    5. 将新 URL 写入 SeenArticle
-    6. 返回新文章（含摘要）
+    5. 返回新文章（含摘要）；SeenArticle 写入由调用方在推送成功后完成
     """
     url = source["url"]
     name = source["name"]

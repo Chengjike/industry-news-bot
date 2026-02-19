@@ -118,9 +118,10 @@ async def generate_summary_with_ai(
         full_text = _extract_article_text(html)
 
         # 过滤过短的文本（可能是导航页或错误页）
-        # 降低阈值到 100 字，因为很多新闻网站的文章提取后可能只有几百字
-        if len(full_text) < 100:
-            logger.debug("文章正文过短（%d 字），跳过 AI 摘要", len(full_text))
+        # 英文文章通常较短，降低阈值到 50 字符
+        min_length = 50 if source_language == "en" else 100
+        if len(full_text) < min_length:
+            logger.debug("文章正文过短（%d 字符），跳过 AI 摘要", len(full_text))
             return (original_title, "")
 
         # 限制输入长度（避免超过 API 限制和成本）
@@ -139,16 +140,22 @@ async def generate_summary_with_ai(
 
         # 根据源语言构建不同的 prompt
         if source_language == "en":
-            prompt = f"""请完成以下任务：
-1. 将英文标题翻译为中文
-2. 阅读英文文章全文，生成中文摘要
+            prompt = f"""你是一个专业的新闻翻译和摘要助手。请完成以下任务：
 
-要求：
-- 标题翻译要准确、简洁，符合中文新闻标题习惯
+任务 1：将英文标题翻译为中文
+- 翻译要准确、简洁，符合中文新闻标题习惯
+- 去除多余的前缀（如 "News"、日期等）
+- 保持专业术语的准确性
+
+任务 2：阅读英文文章全文，生成中文摘要
 - 摘要必须准确概括文章核心内容、关键事实和重要信息
-- 摘要语言简洁流畅，适合邮件推送阅读
-- 摘要严格控制在 {max_chars} 个汉字以内
-- 输出格式：第一行为中文标题，第二行为中文摘要，用 | 分隔
+- 语言简洁流畅，适合邮件推送阅读
+- 严格控制在 {max_chars} 个汉字以内
+
+输出格式要求：
+第一行：中文标题（不要包含 "News"、日期等前缀）
+第二行：中文摘要
+用 | 符号分隔
 
 英文标题：
 {original_title}
@@ -191,15 +198,36 @@ async def generate_summary_with_ai(
                 summary = parts[1].strip()
             else:
                 # 如果没有 | 分隔符，尝试按行分割
-                lines = result_text.split("\n", 1)
-                translated_title = lines[0].strip() if lines else original_title
-                summary = lines[1].strip() if len(lines) > 1 else ""
+                lines = [line.strip() for line in result_text.split("\n") if line.strip()]
+                if len(lines) >= 2:
+                    translated_title = lines[0]
+                    summary = lines[1]
+                elif len(lines) == 1:
+                    # 只有一行，可能是标题或摘要
+                    # 如果长度 > 30，视为摘要；否则视为标题
+                    if len(lines[0]) > 30:
+                        translated_title = original_title
+                        summary = lines[0]
+                    else:
+                        translated_title = lines[0]
+                        summary = ""
+                else:
+                    # 完全解析失败
+                    logger.warning("AI 返回格式异常，无法解析标题和摘要: %s", result_text[:100])
+                    translated_title = original_title
+                    summary = ""
+
+            # 清理标题中的多余前缀
+            for prefix in ["News", "news", "新闻", "标题：", "标题:"]:
+                if translated_title.startswith(prefix):
+                    translated_title = translated_title[len(prefix):].strip()
 
             # 确保不超过字数限制
             if len(summary) > max_chars:
                 summary = summary[:max_chars] + "..."
 
-            logger.info("英文文章翻译+摘要成功，原文 %d 字 → 摘要 %d 字", original_length, len(summary))
+            logger.info("英文文章翻译+摘要成功，原文 %d 字 → 标题: %s, 摘要 %d 字",
+                       original_length, translated_title[:30], len(summary))
             return (translated_title, summary)
         else:
             # 中文源：直接返回摘要

@@ -217,10 +217,16 @@ async def generate_summary_with_ai(
                     translated_title = original_title
                     summary = ""
 
-            # 清理标题中的多余前缀
-            for prefix in ["News", "news", "新闻", "标题：", "标题:"]:
+            # 清理标题中的多余前缀（包括分类标签）
+            prefixes_to_remove = [
+                "News", "news", "新闻", "标题：", "标题:",
+                "Coal", "Electricity", "Natural Gas", "Oil", "Renewables",
+                "Bioenergy", "Nuclear", "Hydrogen", "Energy Efficiency"
+            ]
+            for prefix in prefixes_to_remove:
                 if translated_title.startswith(prefix):
                     translated_title = translated_title[len(prefix):].strip()
+                    break  # 只移除第一个匹配的前缀
 
             # 确保不超过字数限制
             if len(summary) > max_chars:

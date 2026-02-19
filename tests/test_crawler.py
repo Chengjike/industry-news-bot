@@ -176,8 +176,9 @@ class TestCrawlOneSource:
             items = await _crawl_one_source(mock_client, mock_db, source)
 
         assert len(items) == 1
-        mock_db.add_all.assert_called_once()
-        mock_db.commit.assert_called_once()
+        assert items[0].source_id == 1  # source_id 应正确传递
+        # SeenArticle 写入已移至 scheduler.py（推送成功后写入），此处不再调用 db.add_all
+        mock_db.add_all.assert_not_called()
 
     @pytest.mark.asyncio
     async def test_returns_empty_when_no_new_articles(self):

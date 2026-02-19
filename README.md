@@ -11,3 +11,37 @@ AI摘要生成：使用阿里云通义千问API阅读全文后生成高质量摘
 去重机制：基于标题语义去重（使用semhash），避免重复推送。
 邮件合规：邮件底部添加侵权联系邮箱和退订说明，仅推送标题+摘要+链接，符合著作权法规。
 安全与合规：个人信息加密存储，SSRF防护，日志脱敏，依赖漏洞扫描。
+
+## 多语言新闻源支持
+
+系统支持中文和英文新闻源。英文新闻源的标题和摘要会自动翻译为中文后推送。
+
+### 添加英文新闻源
+
+1. 登录 Admin 后台（`http://<服务器IP>/admin`）
+2. 进入「新闻源管理」
+3. 点击「新增」，填写以下字段：
+   - **来源名称**：如 `IEA News`
+   - **新闻列表页地址**：如 `https://www.iea.org/news`
+   - **链接选择器**：CSS 选择器，如 `article a`（用于提取文章链接）
+   - **权重**：1-10，影响文章在 Top N 中的排名
+   - **关键词**：可选，支持 `+必须词 !排除词 普通词` 语法
+   - **语言**：选择 `英文`（重要！）
+   - **所属行业 ID**：关联到具体行业
+4. 保存后，下次早报推送时会自动爬取并翻译
+
+### 推荐的英文新闻源
+
+| 网站 | URL | 领域 | 链接选择器 |
+|------|-----|------|-----------|
+| IEA News | https://www.iea.org/news | 国际能源政策 | `article a` |
+| Clean Energy Wire | https://www.cleanenergywire.org/ | 欧盟清洁能源 | `a` |
+| EU Circular Economy Platform | https://circulareconomy.europa.eu/platform/en/news-and-events/all-news | ESPR/DPP/电池法 | `a` |
+| Utility Dive | https://www.utilitydive.com/ | 电网基础设施 | `a` |
+
+### 技术实现
+
+- 英文源爬取后，标题和正文通过阿里云通义千问 API 一次性翻译为中文
+- 翻译后的中文标题和摘要与中文源文章一起参与打分排序
+- 自动移除常见前缀（如 "News"、"Coal"、"Electricity" 等分类标签）
+

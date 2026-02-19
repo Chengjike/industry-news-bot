@@ -52,9 +52,67 @@ plan.md：如果已完成使命，可将其归档（例如移动到 docs/archive
 
 ---
 
+## 功能记录：英文新闻源接入 + 中文翻译推送
+
+**日期：** 2026-02-19
+
+### 关键技术决策
+
+**需求背景：** 需要接入英文能源新闻网站（IEA News、Clean Energy Wire 等），并将英文标题和摘要翻译为中文后推送。
+
+**采用方案：NewsSource 增加 language 字段**
+- 数据库 schema 变更：`NewsSource` 增加 `language` 字段（默认 `zh`，可选 `en`）
+- AI 摘要服务扩展：英文源时，一次 API 调用同时完成「标题翻译 + 内容摘要」，减少成本
+- 爬虫逻辑调整：根据 `language` 字段触发翻译流程，中文源保持原逻辑不变
+- Admin 后台：增加语言选择下拉框（中文/英文）
+
+**改动文件：**
+- `backend/models/news_source.py`：增加 `language` 字段
+- `backend/database.py`：添加 `language` 列的迁移逻辑
+- `backend/services/ai_summary.py`：扩展 `generate_summary_with_ai()`，支持英文翻译+摘要
+- `backend/services/news_crawler.py`：传递 `language` 和 `original_title` 参数
+- `backend/tasks/scheduler.py`：在 `source_dicts` 中传递 `language` 字段
+- `backend/admin/views.py`：增加 `language` 字段配置
+
+### 易错点与最佳实践
+
+1. **AI prompt 设计**：必须明确要求输出格式（"第一行：中文标题，第二行：中文摘要，用 | 分隔"），否则返回格式不稳定。
+2. **标题前缀清理**：IEA 等网站的标题包含分类标签（Coal、Electricity、Natural Gas 等），需在翻译后自动移除。
+3. **正文长度阈值**：英文文章通常较短，需降低阈值（100→50 字符），避免误判为导航页。
+4. **解析健壮性**：AI 返回可能无 `|` 分隔符或只有单行，需处理边界情况（按行分割、长度判断）。
+5. **返回值变更**：`generate_summary_with_ai()` 从返回 `str` 改为 `tuple[str, str]`（标题, 摘要），需同步修改调用方。
+6. **CSS 选择器**：不同网站结构差异大，需实际测试确认（如 IEA News 用 `article a`，不是 `a.m-article-card__link`）。
+
+### 验证结果
+
+- **骨架层验证**：ECS 推送测试，Top 10 全部来自 IEA News（英文源），标题和摘要均为中文 ✅
+- **血肉层修复**：两轮优化后，10/10 标题完全翻译为中文，无残留英文前缀 ✅
+- **测试覆盖**：本地测试套件 12/12 通过 ✅
+
+---
+
 ## 变更日志
 
-### 2026-02-19 新闻来源多样性优化
+### 2026-02-19 英文新闻源接入 + 中文翻译推送
+
+**需求：** 接入英文能源新闻网站（IEA News、Clean Energy Wire、EU Circular Economy Platform、Utility Dive、Circularise Blog），并将英文标题和摘要翻译为中文后推送。
+
+**修改内容：**
+
+| 文件 | 改动 |
+|------|------|
+| `backend/models/news_source.py` | 增加 `language` 字段（默认 `zh`） |
+| `backend/database.py` | 添加 `ALTER TABLE` 迁移逻辑，自动添加 `language` 列 |
+| `backend/services/ai_summary.py` | 扩展 `generate_summary_with_ai()`：新增 `source_language` 和 `original_title` 参数；英文源时一次调用返回翻译后的标题和摘要；增强 prompt 和解析逻辑；降低英文文章正文长度阈值（100→50 字符）；扩展前缀清理列表（包含 IEA 分类标签） |
+| `backend/services/news_crawler.py` | 修改 `_fetch_article_summary()` 返回值为 `tuple[str, str]`；传递 `source_language` 和 `original_title` 参数；`_crawl_one_source()` 中提取 `language` 字段并传递；更新 docstring |
+| `backend/tasks/scheduler.py` | 在 `source_dicts` 中添加 `language` 字段 |
+| `backend/admin/views.py` | `NewsSourceView` 增加 `language` 字段（EnumField，中文/英文） |
+| `README.md` | 新增「多语言新闻源支持」章节，说明如何添加英文源，推荐 4 个英文新闻源 |
+| `tests/test_crawler.py` | 保持测试套件可运行（12/12 通过） |
+
+**验证结果：** ECS 实际推送后，10/10 标题全部翻译为中文，英文源文章正常参与排名。
+
+---
 
 **需求：** Top 10 早报文章全部来自能源界，国家能源局、新华社等来源长期缺席。
 

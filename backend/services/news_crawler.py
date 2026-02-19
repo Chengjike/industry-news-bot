@@ -45,6 +45,7 @@ class NewsItem:
     source_weight: int
     keywords: Optional[str] = None
     summary: str = ""        # 文章摘要（不超过 140 字）
+    source_id: Optional[int] = None  # 来源 ID，用于推送后写入 SeenArticle
 
 
 def _extract_links(html: str, base_url: str, selector: str) -> list[tuple[str, str]]:
@@ -263,10 +264,9 @@ async def _crawl_one_source(
     ]
     summaries = await asyncio.gather(*summary_tasks)
 
-    # 构建 NewsItem 和 SeenArticle 记录
+    # 构建 NewsItem（不再在此处写入 SeenArticle，由调用方在推送成功后写入）
     now = datetime.now(timezone.utc)
     new_items: list[NewsItem] = []
-    new_records: list[SeenArticle] = []
 
     for (title, article_url), summary in zip(new_articles, summaries):
         new_items.append(NewsItem(
@@ -277,21 +277,13 @@ async def _crawl_one_source(
             source_weight=weight,
             keywords=keywords,
             summary=summary,
-        ))
-        new_records.append(SeenArticle(
-            url=article_url,
-            title=title,
             source_id=source.get("id"),
-            first_seen_at=now,
         ))
 
-    if new_records:
-        db.add_all(new_records)
-        await db.commit()
-        logger.info(
-            "源 [%s]：发现 %d 篇新文章（共提取 %d 篇候选）",
-            name, len(new_items), len(candidate_links),
-        )
+    logger.info(
+        "源 [%s]：发现 %d 篇新文章（共提取 %d 篇候选）",
+        name, len(new_items), len(candidate_links),
+    )
 
     return new_items
 

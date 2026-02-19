@@ -78,7 +78,7 @@ async def run_morning_push(industry_id: int, triggered_by: str = "scheduler") ->
             for s in sources
         ]
 
-        # 采集 → 去重 → 打分（db session 保持打开，供爬虫写入 SeenArticle）
+        # 采集 → 去重 → 打分 → 推送 → 写入 SeenArticle（仅推送成功的文章）
         try:
             raw_items = await crawl_sources(source_dicts, db)
             deduped = deduplicate(raw_items)
@@ -89,6 +89,23 @@ async def run_morning_push(industry_id: int, triggered_by: str = "scheduler") ->
             )
             status = "success" if html_snapshot else "skipped"
             error_msg = None if html_snapshot else "无新增文章（所有文章已在历史记录中）"
+
+            # 推送成功后，将本次推送的文章写入 SeenArticle（避免重复推送）
+            if html_snapshot and top_items:
+                from datetime import datetime, timezone
+                now = datetime.now(timezone.utc)
+                seen_records = [
+                    SeenArticle(
+                        url=item.url,
+                        title=item.title,
+                        source_id=item.source_id,
+                        first_seen_at=now,
+                    )
+                    for item in top_items
+                ]
+                db.add_all(seen_records)
+                logger.info("已将 %d 篇推送文章写入 SeenArticle", len(seen_records))
+
             db.add(PushLog(
                 industry_id=industry_id, push_type="morning", status=status,
                 article_count=len(top_items), recipient_count=len(recipients),
@@ -185,6 +202,24 @@ async def run_evening_push(industry_id: int, triggered_by: str = "scheduler") ->
                 pass
 
 
+async def cleanup_old_records() -> None:
+    """每日凌晨清理超过 7 天的 SeenArticle 和 PushLog 记录，控制数据量"""
+    from datetime import datetime, timezone, timedelta
+    cutoff = datetime.now(timezone.utc) - timedelta(days=7)
+    async with AsyncSessionLocal() as db:
+        seen_result = await db.execute(
+            delete(SeenArticle).where(SeenArticle.first_seen_at < cutoff)
+        )
+        log_result = await db.execute(
+            delete(PushLog).where(PushLog.created_at < cutoff)
+        )
+        await db.commit()
+        logger.info(
+            "每日清理完成：删除 %d 条 SeenArticle，%d 条 PushLog（7天前）",
+            seen_result.rowcount, log_result.rowcount,
+        )
+
+
 async def reset_seen_articles(industry_id: int) -> int:
     """清空行业新闻源的已见文章记录，返回删除条数"""
     async with AsyncSessionLocal() as db:
@@ -227,3 +262,12 @@ async def reload_schedules() -> None:
 
     if not schedules:
         logger.info("数据库中无推送计划，使用默认时间（09:00 早报，18:00 晚报）")
+
+    # 注册每日凌晨 2:00 清理任务（固定，不依赖数据库配置）
+    scheduler.add_job(
+        cleanup_old_records,
+        trigger=CronTrigger(hour=2, minute=0, timezone="Asia/Shanghai"),
+        id="daily_cleanup",
+        replace_existing=True,
+    )
+    logger.info("注册每日清理任务: 02:00 (保留 7 天数据)")

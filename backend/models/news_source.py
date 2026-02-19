@@ -20,6 +20,7 @@ class NewsSource(Base):
     link_selector: Mapped[Optional[str]] = mapped_column(String(200), nullable=True)  # CSS 选择器，如 'a.title'，留空则用 'a'
     weight: Mapped[int] = mapped_column(Integer, default=5)  # 1-10
     keywords: Mapped[Optional[str]] = mapped_column(Text, nullable=True)  # "+必须词 !排除词 普通词"
+    language: Mapped[str] = mapped_column(String(10), default="zh", nullable=False)  # 语言代码：zh=中文, en=英文
     created_at: Mapped[datetime] = mapped_column(DateTime, server_default=func.now())
 
     industry: Mapped["Industry"] = relationship("Industry", back_populates="news_sources")

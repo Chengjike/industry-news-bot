@@ -110,6 +110,11 @@ class NewsSourceView(ModelView):
         StringField("link_selector", label="链接选择器（CSS，留空默认 'a'）", required=False),
         IntegerField("weight", label="权重 (1-10)"),
         TextAreaField("keywords", label="关键词 (+必须 !排除 普通)", required=False),
+        EnumField(
+            "language", label="语言",
+            choices=[("zh", "中文"), ("en", "英文")],
+            required=True,
+        ),
         IntegerField("industry_id", label="所属行业 ID", required=True),
     ]
 

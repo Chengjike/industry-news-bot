@@ -75,6 +75,7 @@ async def run_morning_push(industry_id: int, triggered_by: str = "scheduler") ->
                 "weight": s.weight,
                 "keywords": s.keywords,
                 "link_selector": s.link_selector,
+                "language": s.language,
             }
             for s in sources
         ]

@@ -1,113 +1,233 @@
-# Plan: 新闻来源多样性优化
+# Plan: 英文新闻源接入 + 中文翻译推送
 
-## 状态：已归档（记忆固化完成于 2026-02-19）
+## 状态：骨架层（最小验证中）
+
+---
+
+## 骨架层实施计划
+
+### 验证目标
+用最少代码验证核心假设：通义千问能否在一次 API 调用中完成「英文标题翻译 + 英文内容摘要」并输出中文。
+
+### 最小改动范围
+
+1. **数据库 schema**：`NewsSource` 增加 `language` 字段（默认 `zh`）
+2. **AI 摘要服务**：扩展 `generate_summary_with_ai()`，支持英文源的翻译+摘要
+3. **爬虫逻辑**：`_crawl_one_source()` 传递 language 参数，英文源时调用翻译摘要
+4. **测试验证**：手动添加一个英文源（IEA News），触发爬取，验证输出为中文
+
+### 实施步骤
+
+**步骤 1：数据库 schema 变更**
+- 修改 `backend/models/news_source.py`，增加 `language` 字段
+- 生成 Alembic 迁移脚本
+- 执行迁移（本地 + ECS）
+
+**步骤 2：AI 摘要服务扩展**
+- 修改 `backend/services/ai_summary.py`
+- 新增参数：`source_language`、`original_title`
+- 英文源时，prompt 改为：「请将以下英文新闻翻译为中文并生成摘要，格式：标题|摘要」
+- 返回值改为 `tuple[str, str]`（中文标题, 中文摘要）
+
+**步骤 3：爬虫逻辑调整**
+- 修改 `backend/services/news_crawler.py`
+- `_crawl_one_source()` 接收 `language` 参数
+- 英文源时，调用扩展后的 AI 摘要服务，获取翻译后的标题和摘要
+- 中文源保持原逻辑不变
+
+**步骤 4：手动测试**
+- 通过 Admin 后台添加 IEA News 作为英文源（language=en）
+- 触发爬取
+- 检查返回的 NewsItem 标题和摘要是否为中文
+
+---
+
+## 当前进度
+
+- [x] 步骤 1：数据库 schema 变更（已完成，本地已迁移）
+- [x] 步骤 2：AI 摘要服务扩展（已完成，支持英文翻译+摘要）
+- [x] 步骤 3：爬虫逻辑调整（已完成，传递 language 参数）
+- [x] 步骤 3.5：Admin 后台增加 language 字段（已完成）
+- [ ] 步骤 4：手动测试验证（进行中）
+
+---
+
+## 步骤 4：手动测试验证
+
+### 测试计划
+
+1. **ECS 数据库迁移**：SSH 到 ECS，执行 `init_db()` 添加 language 字段
+2. **添加英文测试源**：通过 Admin 后台添加 IEA News（language=en）
+3. **触发爬取**：手动触发早报推送
+4. **验证结果**：检查推送邮件中的标题和摘要是否为中文
 
 ---
 
 ## 需求描述
 
-当前早报推送的 Top 10 文章全部来自同一个新闻源（能源界），没有达到多来源覆盖的预期效果。需要确保推送内容来自多个不同的新闻源。
+当前所有新闻源均为中文网站。需要：
+1. 支持添加英文新闻网站作为新闻源
+2. 爬取英文文章后，将标题和摘要翻译为中文再推送
 
 ---
 
-## 根本原因（已验证）
+## 现有架构分析
 
-经过数据验证，问题不在排名算法，而在 **SeenArticle 把所有历史文章锁死**：
-
-| 来源 | 列表页链接数 | SeenArticle 已记录数 | 每次可爬新文章数 |
-|------|------------|---------------------|----------------|
-| 国家能源局 | 44 | 44 | **0 篇** |
-| 新华社 | 15 | 15 | **0 篇** |
-| 能源界 | 12 | 19 | **12 篇**（文章更新快，旧 URL 已不在列表页）|
-
-结论：国家能源局和新华社的列表页文章已被全部标记为已见，每次爬取没有新文章进入排名，所以 Top 10 全部来自能源界。
+| 模块 | 现状 | 对英文源的影响 |
+|------|------|--------------|
+| `NewsSource` 模型 | 无语言字段 | 无法区分中英文源 |
+| `_crawl_one_source()` | 直接使用 HTML 原始标题 | 英文标题会原文展示 |
+| `ai_summary.py` | Prompt 未明确指定输出语言 | 英文内容可能输出英文摘要 |
+| 标题短过滤（< 4字符）| 按字符数过滤 | 英文标题字符数较多，不受影响 |
+| 邮件模板 | 直接展示 `title` 和 `summary` | 英文标题会出现在中文邮件中 |
+| 关键词匹配 | 支持中文关键词 | 中文关键词无法匹配英文标题 |
 
 ---
 
 ## 技术难点分析
 
-### 难点 1：SeenArticle 的设计目的与副作用
-- SeenArticle 的目的是避免重复推送同一篇文章
-- 但当一个来源的列表页文章全部被标记后，该来源永远无法贡献新文章
-- 国家能源局更新慢（列表页只有 44 篇，全部已见），新华社同理
+### 难点 1：标题翻译
+- 标题直接从 HTML 链接文本提取，爬虫不经过 AI 处理
+- 需要新增标题翻译步骤，且不能过多增加 API 调用次数
 
-### 难点 2：如何定义"新文章"
-- 当前定义：URL 不在 SeenArticle 表中
-- 问题：国家能源局的文章发布后很长时间才被爬到，第一次爬到就标记为已见，之后永远不会再推送
-- 需要重新思考：是否应该基于"发布时间"而非"是否已见"来判断是否推送
+### 难点 2：摘要翻译
+- 当前 AI summary prompt 未指定输出语言
+- 英文内容输入时，通义千问可能输出英文摘要
+- 需修改 prompt，明确要求输出中文
 
-### 难点 3：时效性与去重的平衡
-- 如果改为基于发布时间过滤，需要确定时间窗口（如：只推送 24 小时内的文章）
-- 同时仍需避免同一篇文章被重复推送
+### 难点 3：语言识别与区分
+- 系统需知道某个新闻源是英文源，才能启用翻译流程
+- 若对所有源都做翻译判断，会增加不必要开销
+
+### 难点 4：翻译合并优化
+- 为减少 API 调用，标题翻译应与摘要生成合并为一次调用
+- 即：输入英文 HTML，一次性输出「中文标题 + 中文摘要」
 
 ---
 
 ## 可能的实现路径
 
-### 方案 A：基于发布时间过滤（推荐）
-将"新文章"的判断从"URL 未见过"改为"发布时间在 N 小时内且未推送过"：
+### 方案 A：NewsSource 新增 language 字段（推荐）
 
-1. 爬取时不再过滤 SeenArticle，而是抓取列表页所有文章
-2. 过滤条件改为：`published_at >= 昨天 00:00`（早报推送前一天的文章）
-3. SeenArticle 改为记录"已推送"的文章，而非"已爬取"的文章
-4. 每次推送后，将本次推送的文章 URL 写入 SeenArticle，避免下次重复推送
+在 `news_source` 表增加 `language` 字段（默认 `zh`，可选 `en`）：
 
-**改动范围：**
-- `backend/services/news_crawler.py`：修改 `_crawl_one_source()`，改变过滤逻辑
-- `backend/tasks/scheduler.py`：推送后写入 SeenArticle 的时机不变，但语义变为"已推送"
+1. **数据库**：`NewsSource` 增加 `language: str = "zh"` 字段
+2. **爬虫**：`_crawl_one_source()` 将 `language` 传入，英文源触发翻译
+3. **AI 摘要**：修改 `generate_summary_with_ai()`，增加 `translate_title` 参数，英文源时一次调用同时返回「中文标题 + 中文摘要」
+4. **NewsItem**：标题字段存储翻译后的中文标题
+5. **Admin 后台**：`NewsSourceView` 增加 language 下拉选项
 
-**优点：** 根治问题，每天都能从所有来源获取当天新文章
-**缺点：** 需要文章有准确的发布时间（当前已有 `published_at` 字段）
+**改动文件：**
+- `backend/models/news_source.py`：增加 `language` 字段
+- `backend/services/ai_summary.py`：扩展 prompt，支持翻译+摘要一体化
+- `backend/services/news_crawler.py`：传递 language，英文源时调用翻译摘要
+- `backend/admin/views.py`：增加 language 字段配置
+- `alembic/`：新增数据库迁移脚本
 
-### 方案 B：SeenArticle 定期清理
-定期（如每天凌晨）清理 SeenArticle 中超过 7 天的记录：
+**优点：** 语义清晰，不影响中文源流程，后续可扩展多语言
+**缺点：** 需要 schema 变更和迁移
 
-**改动范围：**
-- `backend/tasks/scheduler.py`：添加定时清理任务
+### 方案 B：自动检测语言
 
-**优点：** 改动最小
-**缺点：** 治标不治本，7 天内的文章仍无法重新进入排名
+爬取后自动检测标题语言（如用 `langdetect` 库），若为英文则触发翻译：
 
-### 方案 C：SeenArticle 改为记录"已推送"
-只有实际推送过的文章才写入 SeenArticle，爬取时仍过滤已推送文章：
-
-**改动范围：**
-- `backend/tasks/scheduler.py`：将 SeenArticle 写入时机从"爬取后"改为"推送后"
-- `backend/services/news_crawler.py`：移除爬取时写入 SeenArticle 的逻辑
-
-**优点：** 语义更准确，未推送的文章下次仍可参与排名
-**缺点：** 需要清理历史数据（当前 SeenArticle 中有大量"已爬取但未推送"的记录）
+**优点：** 无需修改数据库
+**缺点：** langdetect 对短文本准确率低，引入额外依赖，不够可控
 
 ---
 
-## 需要验证的核心假设
+## 核心假设
 
-1. **假设 1**：国家能源局和新华社的文章有准确的 `published_at` 时间（需验证爬取逻辑）
-2. **假设 2**：方案 A 实施后，每天能从国家能源局和新华社各获取至少 1-3 篇当天文章
-3. **假设 3**：方案 C 中，将 SeenArticle 写入时机改为"推送后"不会引入重复推送风险
+1. **假设 1**：通义千问可在一次 API 调用中完成「翻译标题 + 生成中文摘要」，减少额外 API 开销
+2. **假设 2**：主流英文能源新闻网站（如 Reuters Energy、Oil Price、Energy Monitor）结构清晰，CSS 选择器可正常提取文章链接
+3. **假设 3**：英文源的文章链接标题字符数 ≥ 4，不会被短标题过滤误杀
 
 ---
 
 ## 推荐方案
 
-**方案 C（SeenArticle 改为记录"已推送"）**，同时清理历史数据。
+**方案 A**，理由：
+- 语言是新闻源的固有属性，加字段语义最准确
+- 翻译逻辑只对英文源生效，不影响现有中文源性能
+- 标题+摘要合并为一次 AI 调用，成本可控
 
-理由：
-- 语义最准确：SeenArticle 应该记录"已推送"，而非"已爬取"
-- 改动范围小：只需修改 `scheduler.py` 中写入 SeenArticle 的时机
-- 不依赖发布时间的准确性（方案 A 的风险点）
-- 清理历史数据后，国家能源局和新华社的文章可以重新参与排名
+---
 
-**实施步骤：**
-1. 清理 SeenArticle 历史数据（保留最近 7 天已推送的文章）
-2. 修改 `news_crawler.py`：移除爬取时写入 SeenArticle 的逻辑
-3. 修改 `scheduler.py`：在推送成功后写入 SeenArticle
+## 待确认事项
+
+1. ~~需要接入哪些英文新闻网站？（请提供候选网站列表）~~ ✅ 已完成调研
+2. 是否需要对英文源的关键词规则也改为支持英文输入？
+
+---
+
+## 推荐英文新闻源（能源行业）
+
+基于 2026 年最新调研，推荐以下英文能源新闻网站：
+
+### 优先级 1（综合能源新闻 + 欧盟政策）
+
+| 网站 | URL | 特点 |
+|------|-----|------|
+| **Clean Energy Wire** | https://www.cleanenergywire.org/ | 欧盟清洁能源和气候政策领先英文媒体 |
+| **IEA News** | https://www.iea.org/news | 国际能源署官方，权威政策和数据 |
+| **Utility Dive** | https://www.utilitydive.com/ | 电力、电网基础设施、能源政策深度报道 |
+| **Canary Media** | https://www.canarymedia.com/ | 清洁能源转型专业报道 |
+
+### 优先级 2（欧盟循环经济与产品合规）
+
+| 网站 | URL | 特点 |
+|------|-----|------|
+| **EU Circular Economy Platform** | https://circulareconomy.europa.eu/platform/en/news-and-events/all-news | 欧盟官方循环经济新闻平台 |
+| **European Commission - Energy** | https://energy.ec.europa.eu/index_en | 欧盟委员会能源政策官方页面 |
+| **Circularise Blog** | https://www.circularise.com/blogs | DPP、ESPR、电池护照专业解读 |
+
+### 优先级 3（可再生能源专项）
+
+| 网站 | URL | 特点 |
+|------|-----|------|
+| **Recharge News** | https://www.rechargenews.com/ | 全球风能和太阳能行业领先媒体 |
+| **Renewable Energy World** | https://www.renewableenergyworld.com/ | 清洁能源技术和项目报道 |
+
+**推荐首批接入（5 个网站）：**
+1. **Clean Energy Wire**（欧盟能源政策核心）
+2. **EU Circular Economy Platform**（ESPR/DPP/电池法官方动态）
+3. **IEA News**（国际能源署权威数据）
+4. **Utility Dive**（电网和基础设施）
+5. **Circularise Blog**（DPP 和电池护照技术解读）
+
+---
+
+## ESPR/DPP/电池法关键时间节点
+
+| 时间 | 事件 |
+|------|------|
+| 2026 年 7 月 | 欧盟委员会部署中央 DPP 注册中心 |
+| 2027 年 2 月 18 日 | 电池护照强制生效（EV 和工业电池 > 2 kWh） |
+| 2028-2029 | 电子产品、家具、车辆纳入 DPP 要求 |
+| 2030 | 所有产品组必须携带 DPP |
 
 ---
 
 ## 验收要求（概念层）
 
 请确认以下内容后，输入"确认"进入骨架层：
-1. 是否认可"SeenArticle 改为记录已推送"的方案？
-2. 是否同意清理历史 SeenArticle 数据？
-3. 是否有其他需要考虑的边界情况？
+1. 是否认可方案 A（NewsSource 增加 language 字段）？
+2. 是否同意标题+摘要合并为一次 AI 调用？
+3. 是否认可首批接入以下 5 个网站：
+   - Clean Energy Wire
+   - EU Circular Economy Platform
+   - IEA News
+   - Utility Dive
+   - Circularise Blog
+
+---
+
+**调研来源：**
+- [Clean Energy Wire - 2026 EU Climate and Energy Architecture](https://www.cleanenergywire.org/news/2026-set-shape-future-eus-climate-and-energy-architecture)
+- [European Commission - Circular Economy](https://environment.ec.europa.eu/strategy/circular-economy_en)
+- [EU Circular Economy Stakeholder Platform](https://circulareconomy.europa.eu/platform/en/news-and-events/all-news)
+- [Circularise - Digital Product Passports](https://www.circularise.com/blogs/dpps-required-by-eu-legislation-across-sectors)
+- [Hogan Lovells - Battery Passport Pilot](https://www.hoganlovells.com/en/publications/digital-product-passports-in-the-eu-comprehensive-expansion)
+- [IEA News](https://www.iea.org/news)
+- [Utility Dive](https://www.utilitydive.com/)
+- [Canary Media](https://www.canarymedia.com/)

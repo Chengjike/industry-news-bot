@@ -39,3 +39,10 @@ async def init_db():
             ))
         except Exception:
             pass  # 列已存在，忽略
+
+        try:
+            await conn.execute(text(
+                "ALTER TABLE news_source ADD COLUMN language VARCHAR(10) DEFAULT 'zh' NOT NULL"
+            ))
+        except Exception:
+            pass  # 列已存在，忽略

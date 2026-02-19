@@ -182,15 +182,24 @@ async def _fetch_article_summary(
     url: str,
     semaphore: asyncio.Semaphore,
     max_chars: int = 140,
-) -> str:
+    source_language: str = "zh",
+    original_title: str = ""
+) -> tuple[str, str]:
     """
     请求文章详情页并提取摘要。
 
-    优先使用 AI 生成高质量摘要（需配置 ANTHROPIC_API_KEY），
+    优先使用 AI 生成高质量摘要（需配置 DASHSCOPE_API_KEY），
     失败时降级为简单文本提取。
 
     使用 Semaphore 限制并发数，避免同时发起过多请求。
-    失败时返回空字符串，不阻塞主流程。
+    失败时返回 (original_title, "")，不阻塞主流程。
+
+    Args:
+        source_language: 源语言（zh=中文, en=英文）
+        original_title: 原始标题（英文源时用于翻译）
+
+    Returns:
+        (标题, 摘要) 元组。中文源返回 (original_title, 摘要)，英文源返回 (中文标题, 中文摘要)
     """
     async with semaphore:
         try:
@@ -198,16 +207,18 @@ async def _fetch_article_summary(
 
             # 优先尝试 AI 摘要生成
             from backend.services.ai_summary import generate_summary_with_ai
-            summary = await generate_summary_with_ai(html, max_chars)
+            title, summary = await generate_summary_with_ai(
+                html, max_chars, source_language, original_title
+            )
 
             # AI 失败时降级为简单提取
             if not summary:
                 summary = _extract_summary(html, max_chars)
 
-            return summary
+            return (title, summary)
         except Exception as e:
             logger.debug("获取摘要失败 [%s]: %s", url, e)
-            return ""
+            return (original_title, "")
 
 
 async def _crawl_one_source(
@@ -230,6 +241,7 @@ async def _crawl_one_source(
     weight = source["weight"]
     keywords = source.get("keywords")
     selector = source.get("link_selector") or "a"
+    language = source.get("language", "zh")
 
     html = await _fetch_page(client, url)
     candidate_links = _extract_links(html, url, selector)
@@ -258,18 +270,18 @@ async def _crawl_one_source(
     # 并发请求新文章详情页提取摘要（限制并发数为 5，避免触发反爬）
     semaphore = asyncio.Semaphore(5)
     summary_tasks = [
-        _fetch_article_summary(client, article_url, semaphore)
-        for _, article_url in new_articles
+        _fetch_article_summary(client, article_url, semaphore, source_language=language, original_title=title)
+        for title, article_url in new_articles
     ]
-    summaries = await asyncio.gather(*summary_tasks)
+    results = await asyncio.gather(*summary_tasks)
 
     # 构建 NewsItem（不再在此处写入 SeenArticle，由调用方在推送成功后写入）
     now = datetime.now(timezone.utc)
     new_items: list[NewsItem] = []
 
-    for (title, article_url), summary in zip(new_articles, summaries):
+    for (original_title, article_url), (final_title, summary) in zip(new_articles, results):
         new_items.append(NewsItem(
-            title=title,
+            title=final_title,  # 英文源时为翻译后的中文标题
             url=article_url,
             published_at=now,
             source_name=name,
@@ -292,7 +304,7 @@ async def crawl_sources(sources: list[dict], db: AsyncSession) -> list[NewsItem]
     并发爬取多个新闻网站，汇总返回今日新增文章。
 
     sources 列表中每条记录包含：
-      id, url, name, weight, keywords, link_selector
+      id, url, name, weight, keywords, link_selector, language
     db: 需要传入 AsyncSession，用于读写 SeenArticle 表
     """
     all_items: list[NewsItem] = []

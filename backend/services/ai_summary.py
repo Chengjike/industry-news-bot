@@ -90,20 +90,28 @@ def _extract_article_text(html: str) -> str:
     return full_text
 
 
-async def generate_summary_with_ai(html: str, max_chars: int = 140) -> str:
+async def generate_summary_with_ai(
+    html: str,
+    max_chars: int = 140,
+    source_language: str = "zh",
+    original_title: str = ""
+) -> tuple[str, str]:
     """
     使用阿里云通义千问 API 阅读全文后生成高质量摘要。
 
     Args:
         html: 文章详情页 HTML
         max_chars: 摘要最大字数（默认 140 字）
+        source_language: 源语言（zh=中文, en=英文）
+        original_title: 原始标题（英文源时用于翻译）
 
     Returns:
-        AI 生成的摘要文本，失败时返回空字符串
+        (标题, 摘要) 元组。中文源返回 (original_title, 摘要)，英文源返回 (中文标题, 中文摘要)
+        失败时返回 (original_title, "")
     """
     if not settings.dashscope_api_key:
         logger.debug("未配置 DASHSCOPE_API_KEY，跳过 AI 摘要生成")
-        return ""
+        return (original_title, "")
 
     try:
         # 提取完整正文
@@ -113,7 +121,7 @@ async def generate_summary_with_ai(html: str, max_chars: int = 140) -> str:
         # 降低阈值到 100 字，因为很多新闻网站的文章提取后可能只有几百字
         if len(full_text) < 100:
             logger.debug("文章正文过短（%d 字），跳过 AI 摘要", len(full_text))
-            return ""
+            return (original_title, "")
 
         # 限制输入长度（避免超过 API 限制和成本）
         # 通义千问 qwen-turbo 支持 8K tokens，约 6000 汉字
@@ -129,7 +137,26 @@ async def generate_summary_with_ai(html: str, max_chars: int = 140) -> str:
         # 配置 API Key
         dashscope.api_key = settings.dashscope_api_key
 
-        prompt = f"""请仔细阅读以下新闻文章的完整内容，然后生成一段精炼的摘要。
+        # 根据源语言构建不同的 prompt
+        if source_language == "en":
+            prompt = f"""请完成以下任务：
+1. 将英文标题翻译为中文
+2. 阅读英文文章全文，生成中文摘要
+
+要求：
+- 标题翻译要准确、简洁，符合中文新闻标题习惯
+- 摘要必须准确概括文章核心内容、关键事实和重要信息
+- 摘要语言简洁流畅，适合邮件推送阅读
+- 摘要严格控制在 {max_chars} 个汉字以内
+- 输出格式：第一行为中文标题，第二行为中文摘要，用 | 分隔
+
+英文标题：
+{original_title}
+
+英文文章正文：
+{full_text}"""
+        else:
+            prompt = f"""请仔细阅读以下新闻文章的完整内容，然后生成一段精炼的摘要。
 
 要求：
 1. 摘要必须准确概括文章的核心内容、关键事实和重要信息
@@ -151,22 +178,45 @@ async def generate_summary_with_ai(html: str, max_chars: int = 140) -> str:
 
         if response.status_code != 200:
             logger.warning("通义千问 API 调用失败: %s", response.message)
-            return ""
+            return (original_title, "")
 
-        summary = response.output.text.strip()
+        result_text = response.output.text.strip()
 
-        # 移除可能的前缀
-        for prefix in ["摘要：", "摘要:", "本文", "文章", "新闻"]:
-            if summary.startswith(prefix):
-                summary = summary[len(prefix):].strip()
+        # 解析结果
+        if source_language == "en":
+            # 英文源：解析 "中文标题|中文摘要" 格式
+            if "|" in result_text:
+                parts = result_text.split("|", 1)
+                translated_title = parts[0].strip()
+                summary = parts[1].strip()
+            else:
+                # 如果没有 | 分隔符，尝试按行分割
+                lines = result_text.split("\n", 1)
+                translated_title = lines[0].strip() if lines else original_title
+                summary = lines[1].strip() if len(lines) > 1 else ""
 
-        # 确保不超过字数限制
-        if len(summary) > max_chars:
-            summary = summary[:max_chars] + "..."
+            # 确保不超过字数限制
+            if len(summary) > max_chars:
+                summary = summary[:max_chars] + "..."
 
-        logger.info("AI 摘要生成成功，原文 %d 字 → 摘要 %d 字", original_length, len(summary))
-        return summary
+            logger.info("英文文章翻译+摘要成功，原文 %d 字 → 摘要 %d 字", original_length, len(summary))
+            return (translated_title, summary)
+        else:
+            # 中文源：直接返回摘要
+            summary = result_text
+
+            # 移除可能的前缀
+            for prefix in ["摘要：", "摘要:", "本文", "文章", "新闻"]:
+                if summary.startswith(prefix):
+                    summary = summary[len(prefix):].strip()
+
+            # 确保不超过字数限制
+            if len(summary) > max_chars:
+                summary = summary[:max_chars] + "..."
+
+            logger.info("AI 摘要生成成功，原文 %d 字 → 摘要 %d 字", original_length, len(summary))
+            return (original_title, summary)
 
     except Exception as e:
         logger.warning("AI 摘要生成失败: %s", e)
-        return ""
+        return (original_title, "")

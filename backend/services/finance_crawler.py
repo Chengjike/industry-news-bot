@@ -28,11 +28,13 @@ def _fetch_stock_a(symbol: str, name: str) -> FinanceQuote | None:
             logger.warning("A股 %s 未找到", symbol)
             return None
         r = row.iloc[0]
+
+        # 格式化数据：保留2位小数
         return FinanceQuote(
             name=name or str(r.get("名称", symbol)),
             symbol=symbol,
-            price=float(r.get("最新价", 0)),
-            change_pct=float(r.get("涨跌幅", 0)),
+            price=round(float(r.get("最新价", 0)), 2),
+            change_pct=round(float(r.get("涨跌幅", 0)), 2),
             item_type="stock",
         )
     except Exception as e:
@@ -49,11 +51,13 @@ def _fetch_stock_hk(symbol: str, name: str) -> FinanceQuote | None:
             logger.warning("港股 %s 未找到", symbol)
             return None
         r = row.iloc[0]
+
+        # 格式化数据：保留2位小数
         return FinanceQuote(
             name=name or str(r.get("名称", symbol)),
             symbol=symbol,
-            price=float(r.get("最新价", 0)),
-            change_pct=float(r.get("涨跌幅", 0)),
+            price=round(float(r.get("最新价", 0)), 2),
+            change_pct=round(float(r.get("涨跌幅", 0)), 2),
             item_type="stock",
         )
     except Exception as e:
@@ -64,18 +68,21 @@ def _fetch_stock_hk(symbol: str, name: str) -> FinanceQuote | None:
 def _fetch_futures(symbol: str, name: str) -> FinanceQuote | None:
     """获取大宗商品/期货现货价格"""
     try:
-        df: pd.DataFrame = ak.futures_zh_spot(subscribe_list=symbol, market="CF")
+        # 注意：AKShare 1.18.25+ 使用 symbol 参数而非 subscribe_list
+        df: pd.DataFrame = ak.futures_zh_spot(symbol=symbol, market="CF")
         if df.empty:
             logger.warning("大宗商品 %s 未找到", symbol)
             return None
         r = df.iloc[0]
         price = float(r.get("最新价", r.get("price", 0)))
         change_pct = float(r.get("涨跌幅", r.get("change_rate", 0)))
+
+        # 格式化数据：保留2位小数
         return FinanceQuote(
             name=name or symbol,
             symbol=symbol,
-            price=price,
-            change_pct=change_pct,
+            price=round(price, 2),
+            change_pct=round(change_pct, 2),
             item_type="futures",
         )
     except Exception as e:

@@ -52,6 +52,79 @@ plan.md：如果已完成使命，可将其归档（例如移动到 docs/archive
 
 ---
 
+## 功能记录：HTTPS 安全传输配置
+
+**日期：** 2026-02-20
+
+### 关键技术决策
+
+**需求背景：** ECS 管理界面使用 HTTP 明文传输，存在安全风险：
+- 管理员登录密码、SMTP 配置等敏感信息在网络中明文传输，可能被中间人截获
+- 浏览器显示"不安全"警告，影响用户体验
+- ECS 无域名，无法申请 Let's Encrypt 等受信任证书
+
+**采用方案：自签名 SSL 证书 + HTTPS 强制跳转**
+- 使用 OpenSSL 生成 RSA 2048 自签名证书（有效期 365 天）
+- Nginx 配置 TLS 1.2/1.3 加密传输
+- HTTP 强制跳转到 HTTPS（301 重定向）
+- 提供证书自动续期脚本和健康检查脚本
+
+**改动文件：**
+- `nginx/conf.d/app.conf`：增加 HTTPS 监听（443 端口）、SSL 证书配置、HTTP 跳转
+- `docker-compose.yml`：增加 443 端口映射、挂载 SSL 证书目录
+- `ssl/`：新增 SSL 证书目录和说明文档
+- `.gitignore`：排除证书文件（防止误提交敏感文件）
+- `scripts/renew-ssl-cert.sh`：证书自动续期脚本
+- `scripts/check-https.sh`：HTTPS 健康检查脚本
+- `ARCHITECTURE.md`：新增 ADR-003（HTTPS 实现方案）、更新部署架构
+- `README.md`：新增 HTTPS 访问说明、部署指南、证书续期和常见问题排查
+
+### 易错点与最佳实践
+
+1. **证书 CN 字段必须匹配访问 IP**：自签名证书的 CN（Common Name）应设置为 ECS 公网 IP，否则浏览器会显示域名不匹配错误。
+2. **证书文件权限**：私钥文件（`.key`）应设置为 `600` 权限，防止未授权访问；证书文件不应提交到 Git。
+3. **Docker 卷挂载**：证书目录必须挂载为只读（`:ro`），防止容器内误修改证书。
+4. **443 端口必须开放**：ECS 安全组规则必须开放 443/TCP 端口，否则外部无法访问 HTTPS。
+5. **HTTP 跳转配置**：必须保留 80 端口监听用于 HTTP 到 HTTPS 的 301 跳转，不能完全关闭 HTTP。
+6. **证书有效期管理**：自签名证书有效期 365 天，建议设置 cron 定时任务提前 30 天自动续期。
+7. **Nginx 重载而非重启**：续期证书后使用 `nginx -s reload` 而非 `docker restart`，避免服务中断。
+
+### 验证结果
+
+- **骨架层验证**：ECS 部署成功，HTTPS 访问正常，HTTP 自动跳转到 HTTPS ✅
+- **血肉层完善**：文档完善、运维脚本创建、常见问题排查指南编写 ✅
+- **加密强度**：TLS 1.2/1.3 + RSA 2048，与 Let's Encrypt 证书加密强度相同 ✅
+
+---
+
+## 变更日志
+
+### 2026-02-20 HTTPS 安全传输配置
+
+**需求：** 将 ECS 管理界面从 HTTP 升级为 HTTPS，防止敏感信息明文传输。
+
+**修改内容：**
+
+| 文件 | 改动 |
+|------|------|
+| `nginx/conf.d/app.conf` | 新增 HTTPS 监听（443 端口）；配置 SSL 证书路径（`ssl_certificate`, `ssl_certificate_key`）；配置 TLS 1.2/1.3 安全参数；新增 HTTP 到 HTTPS 的 301 强制跳转 |
+| `docker-compose.yml` | Nginx 容器增加 `443:443` 端口映射；挂载 SSL 证书目录：`./ssl:/etc/nginx/ssl:ro` |
+| `ssl/README.md` | 新增 SSL 证书目录说明文档，包含证书生成命令和安全提示 |
+| `.gitignore` | 排除 `ssl/*.{crt,key,pem}` 文件，防止证书误提交到 Git |
+| `scripts/renew-ssl-cert.sh` | 证书自动续期脚本：备份旧证书 → 生成新证书 → 重启 Nginx → 清理 30 天前的备份 |
+| `scripts/check-https.sh` | HTTPS 健康检查脚本：验证证书文件、有效期、容器状态、端口监听、HTTPS 访问、HTTP 跳转 |
+| `ARCHITECTURE.md` | 新增 ADR-003（HTTPS 传输加密实现方案）；更新安全机制、运行环境、ECS 部署步骤、配置管理、架构演进记录 v1.1 |
+| `README.md` | 新增「HTTPS 安全访问」章节（访问地址、证书警告处理、消除警告步骤）；新增「部署指南」章节（证书生成、443 端口开放、部署验证）；新增「证书续期」章节（手动续期、自动续期 cron）；新增「常见问题」章节（ERR_CONNECTION_REFUSED、ERR_CERT_AUTHORITY_INVALID、HTTP 不跳转排查） |
+| `plan.md` | 记录概念层调研（方案对比、技术难点）、骨架层验证（部署步骤、验证结果）、血肉层完善（文档、脚本、任务清单） |
+
+**验证结果：**
+- ECS 部署成功：`https://8.155.155.125/admin` 可访问，HTTP 自动跳转到 HTTPS
+- 加密强度：TLS 1.2/1.3 + RSA 2048
+- 证书有效期：365 天（2026-02-20 至 2027-02-20）
+- 运维脚本：证书续期脚本和健康检查脚本可正常运行
+
+---
+
 ## 功能记录：英文新闻源接入 + 中文翻译推送
 
 **日期：** 2026-02-19
@@ -191,4 +264,139 @@ graph TD
     C --> E[地雷生成模块]
     F[初始化模块] --> C
     B --> G[右键标记模块]
-    G --> C
+    G --> C## 功能记录：晚报金融数据推送（时间戳 + 期货数据修复）
+
+**日期：** 2026-02-20
+
+### 关键技术决策
+
+**需求背景：** 用户收到晚报邮件后发现两个问题：
+1. 缺少大宗商品（期货）数据 - 原因是期货 API 失效
+2. 所有金融信息都缺少时间戳 - 无法判断数据获取时间
+
+**采用方案：添加时间戳 + 替换失效的期货 API**
+
+#### 1. 时间戳功能实现
+
+**数据结构扩展：**
+```python
+@dataclass
+class FinanceQuote:
+    name: str
+    symbol: str
+    price: float
+    change_pct: float
+    item_type: str
+    timestamp: datetime  # 新增：数据获取时间
+```
+
+**实现要点：**
+- 在 `_fetch_stock_a()`, `_fetch_stock_hk()`, `_fetch_futures()` 三个函数中，所有返回的 `FinanceQuote` 都添加 `timestamp=datetime.now()`
+- 邮件模板新增「数据时间」列，格式为 `HH:MM:SS`（如 15:03:50）
+- 时间戳样式：`font-size: 12px; color: #999;`（灰色小字）
+
+#### 2. 期货 API 修复
+
+**问题根源：** AKShare 1.18.25 的 `futures_zh_spot()` API 存在严重 Bug：
+```
+ValueError: Length mismatch: Expected axis has 1 elements, new values have 44 elements
+```
+
+**根本原因：** 新浪财经期货数据源结构发生变化，AKShare 未及时适配
+
+**解决方案：** 使用 `futures_global_spot_em()` API 替代
+
+**新实现要点：**
+```python
+def _fetch_futures(symbol: str, name: str) -> FinanceQuote | None:
+    """
+    获取大宗商品/期货现货价格
+    
+    注意：由于 AKShare 的 futures_zh_spot() API 存在 Bug，
+    改用 futures_global_spot_em() 获取全球现货数据（620 个商品）。
+    """
+    df = ak.futures_global_spot_em()
+    
+    # 智能匹配逻辑：
+    # 1. 优先按代码精确匹配（如 LCPT, LALT）
+    # 2. 按名称关键词模糊匹配（铜/Copper/Cu, 铝/Aluminum/Al）
+    # 3. 优先选择"综合"品种（主力品种）
+```
+
+**商品代码映射：**
+- `cu2505` (沪铜期货) → 综合铜03 (LCPT)
+- `al2505` (沪铝期货) → 综合铝03 (LALT)
+- `lc2506` (碳酸锂期货) → ❌ 数据不可用（价格为 NaN）
+
+**改动文件：**
+- `backend/services/finance_crawler.py`：添加 `timestamp` 字段、重写 `_fetch_futures()`、添加详细注释
+- `backend/templates/email_evening.html`：添加时间戳列到股票和期货表格
+- `scripts/setup_finance_items.py`：更新为 5 个数据项（暂时移除碳酸锂）
+- `README.md`：新增「晚报金融数据推送」完整章节
+
+### 易错点与最佳实践
+
+1. **期货合约代码的动态性**：期货合约有到期日（如 cu2505 表示 2025年5月交割），需定期手动更新为当前主力合约。建议每季度检查一次。
+
+2. **AKShare API 的不稳定性**：`futures_zh_spot()` 失效后改用 `futures_global_spot_em()`，但后者的锂相关品种价格返回 NaN。**教训**：依赖开源库时需要备用方案。
+
+3. **时间戳字段是必需的**：金融数据的时效性至关重要，用户需要知道数据获取时间。即使骨架层代码粗糙，也必须包含时间戳字段。
+
+4. **数据精度统一**：价格和涨跌幅必须统一保留 2 位小数，使用 `round(value, 2)` 确保格式一致。
+
+5. **邮件模板的时间格式**：使用 `strftime('%H:%M:%S')` 而非完整日期时间，节省邮件空间且更易读。
+
+6. **期货数据源的智能匹配**：由于期货合约代码（cu2505）与现货代码（LCPT）不同，需要实现关键词匹配逻辑：
+   - 提取合约类型（如 cu → 铜）
+   - 搜索包含关键词的商品（铜/Copper/Cu）
+   - 优先选择"综合"品种（主力合约）
+
+7. **价格有效性检查**：必须检查价格是否为 NaN 或 0，避免推送无效数据。
+
+### 验证结果
+
+- **骨架层验证**：ECS 测试成功，5/6 数据项获取成功（3 股票 + 2 期货），时间戳正常 ✅
+- **血肉层完善**：邮件模板优化、文档完善、ECS 部署验证 ✅
+- **实际推送效果**：晚报推送成功，邮件格式正确，数据精度符合要求 ✅
+
+### 碳酸锂数据问题
+
+**现状：** `futures_global_spot_em()` API 中虽有氢氧化锂（LTH00Y）等锂相关品种，但价格字段返回 NaN，无法获取有效数据。
+
+**已验证方案：**
+- `futures_zh_spot()`：失败（Length mismatch 错误）
+- `futures_global_spot_em()`：部分成功（铜铝可用，锂 NaN）
+
+**待验证方案：**
+- 第三方 API（Tushare、JoinQuant）- 需注册和付费
+- 期货交易所官方数据（广期所 API）- 需调研接口
+- 现货价格平台（生意社、卓创资讯）- 需爬虫或付费 API
+
+**暂时方案：** 维持 5 个数据项（3 股票 + 2 期货），碳酸锂数据留待后续有强需求时再调研。
+
+---
+
+### 2026-02-20 晚报金融数据推送（时间戳 + 期货数据修复）
+
+**需求：** 用户收到晚报邮件后发现：1) 缺少大宗商品（期货）数据；2) 所有金融信息都缺少时间戳。需要在骨架层立即解决这两个问题。
+
+**修改内容：**
+
+| 文件 | 改动 |
+|------|------|
+| `backend/services/finance_crawler.py` | 添加 `from datetime import datetime`；`FinanceQuote` 数据类新增 `timestamp: datetime` 字段；`_fetch_stock_a()`、`_fetch_stock_hk()`、`_fetch_futures()` 三个函数返回时添加 `timestamp=datetime.now()`；重写 `_fetch_futures()` 函数：放弃失效的 `futures_zh_spot()` API，改用 `futures_global_spot_em()` 获取全球商品现货数据（620个商品）；实现智能匹配逻辑：优先按代码精确匹配（如 LCPT, LALT），其次按名称关键词模糊匹配（铜/Copper/Cu, 铝/Aluminum/Al），优先选择"综合"品种（主力品种）；添加价格有效性检查（过滤 NaN 和 0）；添加详细注释和错误日志 |
+| `backend/templates/email_evening.html` | 股票表格新增「数据时间」列（`<th>数据时间</th>`）；期货表格新增「数据时间」列；时间戳单元格样式：`style="font-size: 12px; color: #999;"`；时间格式：`{{ q.timestamp.strftime('%H:%M:%S') }}`（仅显示时:分:秒） |
+| `scripts/setup_finance_items.py` | 更新金融数据项配置为 5 个（3 股票 + 2 期货）：阳光电源（300274）、宁德时代（300750）、隆基绿能（601012）、沪铜主力（cu2505）、沪铝主力（al2505）；移除碳酸锂（lc2506）并添加注释说明原因（价格为 NaN，暂不可用）；添加未来解决方案建议（交易所官方API、现货价格平台） |
+| `scripts/test_new_futures_impl.py` | 创建新的测试脚本，验证 5 个金融数据项的获取：测试 A 股数据（3个）、测试期货数据（2个）、验证时间戳字段、验证数据格式（2位小数）；输出分类展示（股票、期货） |
+| `scripts/test_push_simple.py` | 创建简化的晚报推送测试脚本：直接调用 `run_evening_push(1, triggered_by="manual_test")`，用于快速验证推送功能 |
+| `README.md` | 新增「晚报金融数据推送」完整章节：功能特性（A股、期货、时间戳、数据精度、自动推送）；配置金融数据项步骤（Admin 后台 + 脚本批量配置）；数据示例（表格展示邮件效果）；支持的金融数据类型对照表（A股、港股、期货及对应API）；注意事项（期货合约代码需定期更新、碳酸锂暂不可用） |
+| `plan.md` | 记录完整的四阶段开发过程：概念层（技术难点分析、方案对比）、骨架层（Bug修复、API验证、ECS测试）、血肉层（代码完善、邮件模板优化、文档更新）、验收总结（修改文件清单、实际推送效果、遗留问题） |
+
+**验证结果：**
+- ECS 测试成功：5/5 数据项获取成功（3 股票 + 2 期货）
+- 时间戳功能：所有数据包含获取时间，邮件展示格式正确（HH:MM:SS）
+- 数据精度：价格和涨跌幅均保留 2 位小数
+- 晚报推送：手动触发成功，邮件发送正常
+- 遗留问题：碳酸锂数据暂不可用（AKShare API 返回 NaN），留待后续调研
+
+---

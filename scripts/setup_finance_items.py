@@ -41,7 +41,15 @@ async def main():
             # 期货（2026年2月，使用2505/2506合约）
             {"symbol": "cu2505", "name": "沪铜主力", "item_type": "futures", "industry_id": industry_id},
             {"symbol": "al2505", "name": "沪铝主力", "item_type": "futures", "industry_id": industry_id},
-            {"symbol": "lc2506", "name": "碳酸锂主力", "item_type": "futures", "industry_id": industry_id},
+
+            # 注意：碳酸锂期货数据暂时不可用
+            # futures_global_spot_em() API 中虽然有氢氧化锂（LTH00Y）等锂相关品种，
+            # 但价格字段返回 NaN，无法获取有效数据
+            # 未来可考虑：
+            # 1. 使用国内期货交易所官方API
+            # 2. 使用生意社、卓创资讯等现货价格数据源
+            # 3. 使用广期所碳酸锂期货（lc2506）的专用API（如果AKShare未来修复）
+            # {"symbol": "lc2506", "name": "碳酸锂主力", "item_type": "futures", "industry_id": industry_id},
         ]
 
         # 检查是否已存在

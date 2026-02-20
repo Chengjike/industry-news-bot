@@ -1,231 +1,426 @@
-# Plan: 英文新闻源接入 + 中文翻译推送
+# Plan: ECS 管理界面 HTTPS 配置
 
-## 状态：已归档（记忆固化完成于 2026-02-19）
+## 状态：骨架层 - 最小可行性验证中
 
----
-
-## 血肉层任务清单
-
-### 问题 1：部分英文标题未完全翻译
-
-**现象：** Top 10 中有 4 篇文章标题仍保留 "News" 前缀或英文原文片段
-
-**根因分析：**
-- AI 返回格式不稳定：有时返回 "标题|摘要"，有时只返回摘要
-- 解析逻辑过于简单：按 `|` 或换行分割，容易误判
-- 某些页面正文过短（< 100 字），AI 直接跳过，返回 `(original_title, "")`
-- IEA 文章标题包含分类标签（Coal、Electricity 等）
-
-**修复方案：**
-- [x] 增强 AI prompt，明确要求输出格式
-- [x] 改进解析逻辑，处理边界情况
-- [x] 降低正文长度阈值（100→50 字符）
-- [x] 添加日志，记录翻译失败的文章
-- [x] 扩展前缀清理列表，包含 IEA 分类标签
-
-**修复效果：**
-- 修复前：4/10 标题未翻译
-- 第一轮修复：8/10 标题完全翻译
-- 第二轮修复：**10/10 标题全部翻译为中文** ✅
-
-### 问题 2：代码健壮性
-
-- [x] 添加单元测试：测试英文源的翻译流程（已在 ECS 实际验证，10/10 翻译成功）
-- [x] 错误处理：AI 调用失败时的降级策略（已有，返回 original_title）
-- [x] 性能优化：避免对中文源增加不必要的参数传递（已优化，中文源保持原逻辑）
-
-**说明：** 由于 `generate_summary_with_ai` 在函数内部动态 import，单元测试 mock 较复杂。核心功能已在 ECS 生产环境验证通过（10/10 标题翻译成功），暂不强制添加单元测试。
-
-### 问题 3：文档和注释
-
-- [x] 更新 README.md：说明如何添加英文新闻源
-- [x] 补充代码注释：翻译逻辑的关键步骤（已完成）
-
----
-
-## 血肉层完成总结
-
-### 已完成任务
-
-1. ✅ 修复英文标题翻译问题（10/10 标题完全翻译）
-2. ✅ 增强 AI prompt 和解析逻辑
-3. ✅ 降低英文文章正文长度阈值
-4. ✅ 扩展前缀清理列表（包含 IEA 分类标签）
-5. ✅ 更新 README.md（添加英文新闻源使用指南）
-6. ✅ 代码注释完善
-
-### 验证结果
-
-- ECS 生产环境推送测试：10/10 标题全部翻译为中文 ✅
-- 本地测试套件：12/12 测试通过 ✅
+**创建日期：** 2026-02-20
+**概念层完成：** 2026-02-20
+**骨架层开始：** 2026-02-20
 
 ---
 
 ## 需求描述
 
-当前所有新闻源均为中文网站。需要：
-1. 支持添加英文新闻网站作为新闻源
-2. 爬取英文文章后，将标题和摘要翻译为中文再推送
+当前 ECS 上的管理界面（Admin UI）访问使用 HTTP 协议（`http://<ECS-IP>/admin`），存在以下安全风险：
+1. **明文传输**：管理员登录密码、SMTP 配置等敏感信息在网络中明文传输，可能被中间人截获
+2. **身份验证风险**：无法确认服务器真实性，可能遭受中间人攻击
+3. **合规性问题**：现代浏览器（Chrome、Firefox）会对 HTTP 表单提交警告"不安全"，影响用户体验
+
+**目标：** 将管理界面访问协议升级为 HTTPS，确保数据传输加密。
+
+**使用场景：** 仅管理员个人使用，无域名，需要安全性。
+
+**已选方案：** 方案 C - 自签名证书
 
 ---
 
 ## 现有架构分析
 
-| 模块 | 现状 | 对英文源的影响 |
-|------|------|--------------|
-| `NewsSource` 模型 | 无语言字段 | 无法区分中英文源 |
-| `_crawl_one_source()` | 直接使用 HTML 原始标题 | 英文标题会原文展示 |
-| `ai_summary.py` | Prompt 未明确指定输出语言 | 英文内容可能输出英文摘要 |
-| 标题短过滤（< 4字符）| 按字符数过滤 | 英文标题字符数较多，不受影响 |
-| 邮件模板 | 直接展示 `title` 和 `summary` | 英文标题会出现在中文邮件中 |
-| 关键词匹配 | 支持中文关键词 | 中文关键词无法匹配英文标题 |
+### 当前部署架构
+
+```
+用户浏览器 --> [HTTP:80] --> Nginx (Docker) --> [HTTP:8000] --> FastAPI App (Docker)
+```
+
+**现状：**
+- `docker-compose.yml` 中 Nginx 容器仅映射 80 端口
+- `nginx/conf.d/app.conf` 中仅监听 `listen 80`，无 SSL/TLS 配置
+- 无 SSL 证书文件（`*.crt`, `*.key`）
+- 无 HTTPS 强制跳转逻辑
+
+**影响分析：**
+- 所有流量明文传输，包括 Admin 登录凭证、SMTP 密码等
+- 浏览器地址栏显示"不安全"警告
+- 容易遭受网络嗅探和中间人攻击
 
 ---
 
 ## 技术难点分析
 
-### 难点 1：标题翻译
-- 标题直接从 HTML 链接文本提取，爬虫不经过 AI 处理
-- 需要新增标题翻译步骤，且不能过多增加 API 调用次数
+### 难点 1：SSL 证书获取
 
-### 难点 2：摘要翻译
-- 当前 AI summary prompt 未指定输出语言
-- 英文内容输入时，通义千问可能输出英文摘要
-- 需修改 prompt，明确要求输出中文
+**问题：** HTTPS 需要有效的 SSL/TLS 证书，有以下选择：
 
-### 难点 3：语言识别与区分
-- 系统需知道某个新闻源是英文源，才能启用翻译流程
-- 若对所有源都做翻译判断，会增加不必要开销
+| 方案 | 优点 | 缺点 | 适用场景 |
+|------|------|------|----------|
+| **Let's Encrypt 免费证书** | 免费，自动续期，被浏览器信任 | 需要域名，90 天有效期 | 有域名的生产环境（推荐） |
+| **阿里云 SSL 证书** | 免费 DV 证书，1 年有效期 | 需要域名，手动续期 | 有域名，不想自动续期 |
+| **自签名证书** | 完全免费，无需域名 | 浏览器不信任，需手动添加例外 | 仅限内网或测试环境 |
 
-### 难点 4：翻译合并优化
-- 为减少 API 调用，标题翻译应与摘要生成合并为一次调用
-- 即：输入英文 HTML，一次性输出「中文标题 + 中文摘要」
+**核心问题：** 当前 ECS 是否绑定了域名？如果没有域名，只能用自签名证书。
 
----
+### 难点 2：证书自动续期
 
-## 可能的实现路径
+- Let's Encrypt 证书有效期仅 90 天，需要定期续期
+- 可用 `certbot` + cron 自动续期，或使用 `acme.sh` 脚本
+- 需确保续期后 Nginx 自动重载配置（`nginx -s reload`）
 
-### 方案 A：NewsSource 新增 language 字段（推荐）
+### 难点 3：Nginx 配置调整
 
-在 `news_source` 表增加 `language` 字段（默认 `zh`，可选 `en`）：
+需要修改 `nginx/conf.d/app.conf`，包括：
+1. 新增 `listen 443 ssl` 监听 HTTPS
+2. 配置 SSL 证书路径（`ssl_certificate`, `ssl_certificate_key`）
+3. 配置安全的 SSL 参数（TLS 1.2+，推荐密码套件）
+4. HTTP 强制跳转到 HTTPS（`return 301 https://$host$request_uri;`）
 
-1. **数据库**：`NewsSource` 增加 `language: str = "zh"` 字段
-2. **爬虫**：`_crawl_one_source()` 将 `language` 传入，英文源触发翻译
-3. **AI 摘要**：修改 `generate_summary_with_ai()`，增加 `translate_title` 参数，英文源时一次调用同时返回「中文标题 + 中文摘要」
-4. **NewsItem**：标题字段存储翻译后的中文标题
-5. **Admin 后台**：`NewsSourceView` 增加 language 下拉选项
+### 难点 4：Docker 端口映射调整
 
-**改动文件：**
-- `backend/models/news_source.py`：增加 `language` 字段
-- `backend/services/ai_summary.py`：扩展 prompt，支持翻译+摘要一体化
-- `backend/services/news_crawler.py`：传递 language，英文源时调用翻译摘要
-- `backend/admin/views.py`：增加 language 字段配置
-- `alembic/`：新增数据库迁移脚本
+`docker-compose.yml` 中需要：
+1. Nginx 容器新增 `443:443` 端口映射
+2. 将 SSL 证书挂载到容器内（如 `./ssl:/etc/nginx/ssl:ro`）
 
-**优点：** 语义清晰，不影响中文源流程，后续可扩展多语言
-**缺点：** 需要 schema 变更和迁移
+### 难点 5：防火墙与安全组配置
 
-### 方案 B：自动检测语言
-
-爬取后自动检测标题语言（如用 `langdetect` 库），若为英文则触发翻译：
-
-**优点：** 无需修改数据库
-**缺点：** langdetect 对短文本准确率低，引入额外依赖，不够可控
+ECS 需要：
+1. 安全组开放 443 端口（HTTPS）
+2. 保持 80 端口开放（用于 HTTP 到 HTTPS 的跳转）
+3. 如果使用 Let's Encrypt，需开放 80 端口用于域名验证
 
 ---
 
-## 核心假设
+## 方案对比（仅供参考）
 
-1. **假设 1**：通义千问可在一次 API 调用中完成「翻译标题 + 生成中文摘要」，减少额外 API 开销
-2. **假设 2**：主流英文能源新闻网站（如 Reuters Energy、Oil Price、Energy Monitor）结构清晰，CSS 选择器可正常提取文章链接
-3. **假设 3**：英文源的文章链接标题字符数 ≥ 4，不会被短标题过滤误杀
-
----
-
-## 推荐方案
-
-**方案 A**，理由：
-- 语言是新闻源的固有属性，加字段语义最准确
-- 翻译逻辑只对英文源生效，不影响现有中文源性能
-- 标题+摘要合并为一次 AI 调用，成本可控
+| 方案 | 前提条件 | 优点 | 缺点 | 适用场景 |
+|------|----------|------|------|----------|
+| **方案 A：Let's Encrypt** | 需要域名 | 浏览器信任，自动续期 | 必须有域名 | 有域名的生产环境 |
+| **方案 B：阿里云 SSL 证书** | 需要域名 | 1 年有效期 | 手动续期 | 有域名，不想自动化 |
+| **方案 C：自签名证书（已选择）** | 无需域名 | 免费、简单、提供加密 | 浏览器警告 | 无域名的个人使用 |
 
 ---
 
-## 待确认事项
+## 用户确认信息（2026-02-20）
 
-1. ~~需要接入哪些英文新闻网站？（请提供候选网站列表）~~ ✅ 已完成调研
-2. 是否需要对英文源的关键词规则也改为支持英文输入？
+1. **ECS 域名绑定情况**：无域名，暂不计划申请
+2. **访问场景**：仅管理员个人使用
+3. **安全需求**：需要传输加密，保障安全性
+4. **ECS 权限**：有权限开放 443 端口
 
----
-
-## 推荐英文新闻源（能源行业）
-
-基于 2026 年最新调研，推荐以下英文能源新闻网站：
-
-### 优先级 1（综合能源新闻 + 欧盟政策）
-
-| 网站 | URL | 特点 |
-|------|-----|------|
-| **Clean Energy Wire** | https://www.cleanenergywire.org/ | 欧盟清洁能源和气候政策领先英文媒体 |
-| **IEA News** | https://www.iea.org/news | 国际能源署官方，权威政策和数据 |
-| **Utility Dive** | https://www.utilitydive.com/ | 电力、电网基础设施、能源政策深度报道 |
-| **Canary Media** | https://www.canarymedia.com/ | 清洁能源转型专业报道 |
-
-### 优先级 2（欧盟循环经济与产品合规）
-
-| 网站 | URL | 特点 |
-|------|-----|------|
-| **EU Circular Economy Platform** | https://circulareconomy.europa.eu/platform/en/news-and-events/all-news | 欧盟官方循环经济新闻平台 |
-| **European Commission - Energy** | https://energy.ec.europa.eu/index_en | 欧盟委员会能源政策官方页面 |
-| **Circularise Blog** | https://www.circularise.com/blogs | DPP、ESPR、电池护照专业解读 |
-
-### 优先级 3（可再生能源专项）
-
-| 网站 | URL | 特点 |
-|------|-----|------|
-| **Recharge News** | https://www.rechargenews.com/ | 全球风能和太阳能行业领先媒体 |
-| **Renewable Energy World** | https://www.renewableenergyworld.com/ | 清洁能源技术和项目报道 |
-
-**推荐首批接入（5 个网站）：**
-1. **Clean Energy Wire**（欧盟能源政策核心）
-2. **EU Circular Economy Platform**（ESPR/DPP/电池法官方动态）
-3. **IEA News**（国际能源署权威数据）
-4. **Utility Dive**（电网和基础设施）
-5. **Circularise Blog**（DPP 和电池护照技术解读）
+**最终选择：方案 C - 自签名证书**
 
 ---
 
-## ESPR/DPP/电池法关键时间节点
+## 采用方案详情：方案 C（自签名证书）
 
-| 时间 | 事件 |
-|------|------|
-| 2026 年 7 月 | 欧盟委员会部署中央 DPP 注册中心 |
-| 2027 年 2 月 18 日 | 电池护照强制生效（EV 和工业电池 > 2 kWh） |
-| 2028-2029 | 电子产品、家具、车辆纳入 DPP 要求 |
-| 2030 | 所有产品组必须携带 DPP |
+**适用场景：** 无域名，仅供管理员个人访问，需要传输加密
+
+**实现步骤：**
+
+1. **生成自签名证书**
+   ```bash
+   # 在 ECS 上创建 SSL 证书目录
+   mkdir -p /opt/news-bot/ssl
+
+   # 生成自签名证书（有效期 1 年）
+   openssl req -x509 -nodes -days 365 -newkey rsa:2048 \
+     -keyout /opt/news-bot/ssl/selfsigned.key \
+     -out /opt/news-bot/ssl/selfsigned.crt \
+     -subj "/C=CN/ST=Beijing/L=Beijing/O=NewsBot/CN=<ECS-IP>"
+   ```
+
+2. **修改 Nginx 配置**
+   - 修改 `nginx/conf.d/app.conf`
+   - 增加 HTTPS 监听（443 端口）
+   - 配置 SSL 证书路径
+   - 配置 HTTP 强制跳转到 HTTPS
+   - 配置安全的 SSL 参数（TLS 1.2+）
+
+3. **修改 Docker Compose 配置**
+   - `docker-compose.yml` 中 Nginx 容器新增 `443:443` 端口映射
+   - 挂载 SSL 证书目录：`./ssl:/etc/nginx/ssl:ro`
+
+4. **开放 ECS 安全组 443 端口**
+   - 阿里云控制台 → ECS → 安全组规则 → 入方向规则
+   - 添加规则：协议 TCP，端口 443，授权对象 0.0.0.0/0
+
+5. **重启服务并验证**
+   ```bash
+   docker compose down
+   docker compose up -d
+   ```
+
+6. **浏览器信任证书（一次性操作）**
+   - 首次访问 `https://<ECS-IP>/admin` 会显示安全警告
+   - 点击"高级" → "继续访问（不安全）"
+   - 可选：将证书导入浏览器受信任根证书列表，后续访问无警告
+
+**优点：**
+- 提供 HTTPS 传输加密，防止中间人攻击 ✅
+- 无需域名，完全免费 ✅
+- 实现简单，10 分钟内完成 ✅
+- 仅个人使用，一次性信任证书即可 ✅
+
+**缺点：**
+- 浏览器首次访问会显示安全警告（可通过手动信任解决）
+- 换浏览器或设备需重新信任（但用户仅一人，影响小）
+- 不适合多人协作或公开访问场景
+
+**安全性说明：**
+- 自签名证书提供与正规证书**完全相同的加密强度**（TLS 1.2/1.3 + AES-256）
+- 唯一区别：浏览器无法验证证书签发者身份（因为是自己签发的）
+- 对于个人使用场景，安全性完全足够
 
 ---
 
-## 验收要求（概念层）
+## 概念层调研总结
 
-请确认以下内容后，输入"确认"进入骨架层：
-1. 是否认可方案 A（NewsSource 增加 language 字段）？
-2. 是否同意标题+摘要合并为一次 AI 调用？
-3. 是否认可首批接入以下 5 个网站：
-   - Clean Energy Wire
-   - EU Circular Economy Platform
-   - IEA News
-   - Utility Dive
-   - Circularise Blog
+### 关键发现
+
+1. **现有架构风险**：
+   - Nginx 仅监听 HTTP 80 端口，无 SSL/TLS 配置
+   - 管理员密码、SMTP 配置等敏感信息明文传输
+   - 存在中间人攻击风险
+
+2. **技术限制**：
+   - 无域名情况下，无法申请 Let's Encrypt 等受信任的免费证书
+   - 自签名证书可提供传输加密，但浏览器会显示警告
+
+3. **最佳实践**：
+   - 自签名证书 + 浏览器手动信任，适合个人使用场景
+   - 传输加密强度与正规证书相同（RSA 2048 + TLS 1.2+）
+   - 需同时开放 80（HTTP 跳转）和 443（HTTPS）端口
+
+### 改动范围
+
+| 文件 | 改动内容 |
+|------|----------|
+| `nginx/conf.d/app.conf` | 增加 HTTPS 监听、SSL 配置、HTTP 跳转 |
+| `docker-compose.yml` | Nginx 容器增加 443 端口映射、挂载 SSL 证书目录 |
+| `/opt/news-bot/ssl/` | 新增自签名证书文件（`.crt` 和 `.key`） |
+| ECS 安全组规则 | 开放 TCP 443 端口 |
+
+### 验证计划（骨架层）
+
+1. 在 ECS 上生成自签名证书
+2. 修改 Nginx 配置，启用 HTTPS
+3. 修改 Docker Compose，映射 443 端口
+4. 重启服务，验证 HTTPS 访问
+5. 确认 HTTP 自动跳转到 HTTPS
+6. 确认管理员登录正常（会显示证书警告，但可继续访问）
 
 ---
 
-**调研来源：**
-- [Clean Energy Wire - 2026 EU Climate and Energy Architecture](https://www.cleanenergywire.org/news/2026-set-shape-future-eus-climate-and-energy-architecture)
-- [European Commission - Circular Economy](https://environment.ec.europa.eu/strategy/circular-economy_en)
-- [EU Circular Economy Stakeholder Platform](https://circulareconomy.europa.eu/platform/en/news-and-events/all-news)
-- [Circularise - Digital Product Passports](https://www.circularise.com/blogs/dpps-required-by-eu-legislation-across-sectors)
-- [Hogan Lovells - Battery Passport Pilot](https://www.hoganlovells.com/en/publications/digital-product-passports-in-the-eu-comprehensive-expansion)
-- [IEA News](https://www.iea.org/news)
-- [Utility Dive](https://www.utilitydive.com/)
-- [Canary Media](https://www.canarymedia.com/)
+## 骨架层验证步骤
+
+### 步骤 1：本地配置文件修改 ✅
+
+已完成以下文件修改：
+
+1. **nginx/conf.d/app.conf**
+   - 增加 HTTPS 监听（443 端口）
+   - 配置 SSL 证书路径
+   - HTTP 强制跳转到 HTTPS
+   - 配置 TLS 1.2/1.3 安全参数
+
+2. **docker-compose.yml**
+   - Nginx 容器增加 `443:443` 端口映射
+   - 挂载 SSL 证书目录：`./ssl:/etc/nginx/ssl:ro`
+
+3. **ssl/ 目录**
+   - 创建 SSL 证书目录
+   - 添加 README.md 说明文件
+
+4. **.gitignore**
+   - 排除证书文件（`*.crt`, `*.key`, `*.pem`），防止误提交敏感文件
+
+### 步骤 2：ECS 操作指令（待执行）
+
+请在 ECS 服务器上按顺序执行以下命令：
+
+#### 2.1 拉取最新代码
+
+```bash
+# SSH 到 ECS
+ssh root@<ECS-IP>
+
+# 进入项目目录
+cd /opt/news-bot
+
+# 拉取最新配置
+git pull
+```
+
+#### 2.2 生成自签名 SSL 证书
+
+```bash
+# 创建 SSL 证书目录（如果不存在）
+mkdir -p ssl
+
+# 生成自签名证书（有效期 1 年，RSA 2048 位）
+openssl req -x509 -nodes -days 365 -newkey rsa:2048 \
+  -keyout ssl/selfsigned.key \
+  -out ssl/selfsigned.crt \
+  -subj "/C=CN/ST=Beijing/L=Beijing/O=NewsBot/CN=$(curl -s ifconfig.me)"
+
+# 验证证书生成成功
+ls -lh ssl/
+# 应该看到两个文件：
+# selfsigned.crt (约 1.3K)
+# selfsigned.key (约 1.7K)
+
+# 查看证书信息（可选）
+openssl x509 -in ssl/selfsigned.crt -text -noout | head -n 20
+```
+
+#### 2.3 开放 ECS 安全组 443 端口
+
+⚠️ **重要：在阿里云控制台操作**
+
+1. 登录阿里云控制台
+2. 进入 **ECS 控制台** → **实例**
+3. 找到你的 ECS 实例，点击右侧的 **安全组配置**
+4. 点击 **配置规则** → **入方向规则** → **添加规则**
+5. 填写以下信息：
+   - **协议类型**：TCP
+   - **端口范围**：443/443
+   - **授权对象**：0.0.0.0/0
+   - **描述**：HTTPS 访问
+6. 点击 **确定**
+
+#### 2.4 重启 Docker 服务
+
+```bash
+# 停止现有服务
+docker compose down
+
+# 重新构建并启动（会自动加载新配置）
+docker compose up -d
+
+# 查看容器状态
+docker compose ps
+# 应该看到 news_bot_nginx 和 news_bot_app 都是 Up 状态
+
+# 查看 Nginx 日志，确认无错误
+docker compose logs nginx
+```
+
+#### 2.5 验证 HTTPS 访问
+
+```bash
+# 在 ECS 上测试本地 HTTPS 访问
+curl -k https://localhost/health
+# 应该返回：{"status":"ok"}
+
+# 测试 HTTP 跳转到 HTTPS
+curl -I http://localhost/admin
+# 应该看到 301 重定向到 https://...
+```
+
+#### 2.6 浏览器访问测试
+
+1. 打开浏览器，访问 `https://<ECS-IP>/admin`
+2. 会看到安全警告（这是正常的，因为是自签名证书）
+3. 点击 **高级** → **继续访问（不安全）** 或 **接受风险并继续**
+4. 应该能看到管理界面登录页面
+5. 测试登录功能是否正常
+
+#### 2.7 （可选）浏览器信任证书
+
+为了后续访问不再显示警告，可以将证书导入浏览器：
+
+**Chrome/Edge：**
+1. 访问 `https://<ECS-IP>/admin`，点击地址栏的 "不安全" 图标
+2. 点击 **证书无效** → **详细信息** → **导出**
+3. 保存为 `newsbot.crt`
+4. 设置 → 隐私和安全 → 安全 → 管理证书 → 受信任的根证书颁发机构 → 导入
+5. 选择刚导出的 `newsbot.crt`，点击确定
+6. 重启浏览器，再次访问应该不再警告
+
+**Firefox：**
+1. 访问 `https://<ECS-IP>/admin`，点击 **高级** → **接受风险并继续**
+2. 点击地址栏的锁图标 → **连接不安全** → **更多信息** → **查看证书** → **下载 PEM (证书)**
+3. 设置 → 隐私与安全 → 证书 → 查看证书 → 证书颁发机构 → 导入
+4. 选择下载的证书，勾选 **信任此 CA 标识网站**
+5. 重启浏览器
+
+### 步骤 3：验证清单
+
+完成以上步骤后，请验证以下内容：
+
+- [ ] `https://<ECS-IP>/admin` 可以访问（虽然有安全警告）
+- [ ] `http://<ECS-IP>/admin` 自动跳转到 HTTPS
+- [ ] 管理界面登录功能正常
+- [ ] 可以查看和编辑行业、新闻源等配置
+- [ ] （可选）浏览器已信任证书，不再显示警告
+
+### 遇到问题时的排查步骤
+
+如果遇到无法访问的情况，请按以下顺序排查：
+
+1. **检查证书文件是否生成**
+   ```bash
+   ls -lh /opt/news-bot/ssl/
+   ```
+
+2. **检查 Nginx 容器是否正常启动**
+   ```bash
+   docker compose ps nginx
+   docker compose logs nginx
+   ```
+
+3. **检查 443 端口是否监听**
+   ```bash
+   netstat -tuln | grep 443
+   ```
+
+4. **检查 ECS 安全组是否开放 443 端口**
+   - 阿里云控制台 → ECS → 安全组 → 入方向规则 → 查看 443/TCP
+
+5. **测试本地连接**
+   ```bash
+   curl -k https://localhost/health
+   ```
+
+6. **查看完整日志**
+   ```bash
+   docker compose logs -f
+   ```
+
+---
+
+## 骨架层验证结果（待填写）
+
+### 验证日期：____
+
+### 验证结果：
+- HTTPS 访问：[ ] 成功 / [ ] 失败
+- HTTP 跳转：[ ] 成功 / [ ] 失败
+- 管理界面功能：[ ] 正常 / [ ] 异常
+- 浏览器警告：[ ] 符合预期 / [ ] 异常
+
+### 遇到的问题：
+（如有问题，请在此记录）
+
+### 解决方案：
+（如有问题，请记录如何解决）
+
+### 是否通过骨架层验证：[ ] 是 / [ ] 否
+
+---
+
+## 验收要求（骨架层）
+
+骨架层验证成功标准：
+1. ✅ HTTPS 访问正常（`https://<ECS-IP>/admin` 可访问）
+2. ✅ HTTP 自动跳转到 HTTPS
+3. ✅ 管理界面功能正常（登录、配置管理）
+4. ✅ 证书生成和挂载成功
+
+**完成验证后，请回复验证结果，我将进入血肉层进行代码完善和文档补充。**
+
+---
+
+## 参考资料
+
+- [Let's Encrypt 官方文档](https://letsencrypt.org/getting-started/)
+- [Certbot 使用指南](https://certbot.eff.org/)
+- [Nginx SSL 配置最佳实践](https://ssl-config.mozilla.org/)
+- [阿里云 SSL 证书](https://www.aliyun.com/product/cas)

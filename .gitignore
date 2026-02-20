@@ -40,3 +40,8 @@ alembic/versions/*.pyc
 
 # macOS
 .DS_Store
+
+# SSL certificates (should not be committed)
+ssl/*.crt
+ssl/*.key
+ssl/*.pem

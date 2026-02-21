@@ -1,4 +1,5 @@
 """starlette-admin 管理界面配置"""
+import logging
 import bcrypt
 from starlette.requests import Request
 from starlette.responses import Response, RedirectResponse
@@ -15,6 +16,9 @@ from backend.config import settings
 from backend.database import engine
 from backend.models import Industry, NewsSource, FinanceItem, Recipient, SmtpConfig, PushSchedule
 from backend.models.push_log import PushLog
+
+logger = logging.getLogger(__name__)
+
 # ────────────────────────────────────────
 # 认证 Provider（单管理员账号）
 # ────────────────────────────────────────
@@ -23,16 +27,25 @@ class SingleAdminAuthProvider(AuthProvider):
         self, username: str, password: str, remember_me: bool,
         request: Request, response: Response,
     ) -> Response:
+        from backend.app import _check_login_rate_limit
+        ip = request.client.host if request.client else "unknown"
+        if not _check_login_rate_limit(ip):
+            logger.warning("登录速率超限: IP=%s", ip)
+            raise LoginFailed("登录尝试过于频繁，请稍后再试")
         if username != settings.admin_username:
+            logger.warning("登录失败（用户名错误）: IP=%s, username=%s", ip, username)
             raise LoginFailed("用户名或密码错误")
         stored = settings.admin_password
         # 支持 bcrypt hash（生产）和明文（开发）
         if stored.startswith("$2b$"):
             if not bcrypt.checkpw(password.encode(), stored.encode()):
+                logger.warning("登录失败（密码错误）: IP=%s", ip)
                 raise LoginFailed("用户名或密码错误")
         else:
             if password != stored:
+                logger.warning("登录失败（密码错误）: IP=%s", ip)
                 raise LoginFailed("用户名或密码错误")
+        logger.info("登录成功: IP=%s, username=%s", ip, username)
         request.session.update({"username": username})
         return response
 

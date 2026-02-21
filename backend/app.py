@@ -1,10 +1,12 @@
 """FastAPI 应用主入口"""
 import logging
 import os
+import time
+from collections import defaultdict
 from contextlib import asynccontextmanager
 
-from fastapi import FastAPI
-from fastapi.responses import HTMLResponse
+from fastapi import FastAPI, Request
+from fastapi.responses import HTMLResponse, JSONResponse
 from starlette.middleware.sessions import SessionMiddleware
 
 from backend.config import settings
@@ -31,6 +33,24 @@ async def lifespan(app: FastAPI):
     # 关闭
     scheduler.shutdown(wait=False)
     logger.info("应用关闭")
+
+
+# 登录速率限制：每个 IP 每分钟最多 10 次尝试
+_login_attempts: dict = defaultdict(list)
+_LOGIN_LIMIT = 10
+_LOGIN_WINDOW = 60  # 秒
+
+
+def _check_login_rate_limit(ip: str) -> bool:
+    """返回 True 表示允许，False 表示超限"""
+    now = time.time()
+    attempts = _login_attempts[ip]
+    # 清理窗口外的记录
+    _login_attempts[ip] = [t for t in attempts if now - t < _LOGIN_WINDOW]
+    if len(_login_attempts[ip]) >= _LOGIN_LIMIT:
+        return False
+    _login_attempts[ip].append(now)
+    return True
 
 
 class ForwardedProtoMiddleware:
@@ -72,8 +92,12 @@ async def health():
 
 
 @app.get("/push-log/{log_id}/preview", response_class=HTMLResponse)
-async def push_log_preview(log_id: int):
-    """返回推送记录的邮件 HTML 快照（运维预览用）"""
+async def push_log_preview(log_id: int, request: Request):
+    """返回推送记录的邮件 HTML 快照（仅管理员可访问）"""
+    from backend.admin.views import SingleAdminAuthProvider
+    auth = SingleAdminAuthProvider()
+    if not await auth.is_authenticated(request):
+        return HTMLResponse("<p style='font-family:sans-serif;padding:2rem'>未授权，请先登录管理后台</p>", status_code=401)
     from backend.models.push_log import PushLog
     async with AsyncSessionLocal() as db:
         log = await db.get(PushLog, log_id)

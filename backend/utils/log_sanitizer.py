@@ -9,6 +9,14 @@ _PATTERNS = [
     (re.compile(r"(password['\"]?\s*[:=]\s*)['\"]?[\w!@#$%^&*]+['\"]?", re.IGNORECASE), r"\1***"),
     # Authorization header
     (re.compile(r"(Authorization:\s*\w+\s+)[\w.=+/-]+", re.IGNORECASE), r"\1***"),
+    # API Key / Token 键值对（如 api_key=xxx, token=xxx, secret=xxx）
+    (re.compile(r"(api[_-]?key['\"]?\s*[:=]\s*)['\"]?[\w\-]+['\"]?", re.IGNORECASE), r"\1***"),
+    (re.compile(r"(token['\"]?\s*[:=]\s*)['\"]?[\w\-]+['\"]?", re.IGNORECASE), r"\1***"),
+    (re.compile(r"(secret['\"]?\s*[:=]\s*)['\"]?[\w\-]+['\"]?", re.IGNORECASE), r"\1***"),
+    # Bearer token
+    (re.compile(r"(Bearer\s+)[\w\-.=+/]+", re.IGNORECASE), r"\1***"),
+    # Fernet 加密串（以 gAAAAA 开头的长字符串）
+    (re.compile(r"gAAAAA[\w\-=+/]{20,}"), "gAAAAA***"),
 ]
 
 

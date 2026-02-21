@@ -1,6 +1,6 @@
 # 项目宪法：CLAUDE.md
 
-**版本：** v3.0
+**版本：** v3.1
 **最后更新：** 2026-02-21
 **适用项目：** 多行业新闻与金融信息推送机器人
 
@@ -210,6 +210,85 @@ ARCH 牵头打分，PM 最终核定等级（6-12低 / 13-20中 / 21-30高），�
 | 完整模式 | > 120 分钟（架构变更、复杂功能） | 完整四阶段 |
 
 **已验证优化项**：`TQDM_DISABLE=1` 禁用进度条；heredoc 批量 SSH；`docker-compose.dev.yml` 热加载；`plan.md` 只记录关键决策和任务清单。
+
+### 安全加固 Phase 1 + 稳定性加固 Phase 2 - 2026-02-21
+
+- **功能描述**：架构审视后执行的两阶段加固：Phase 1 安全加固，Phase 2 稳定性加固。
+- **评估参与人**：ARCH, SEC, OPS, DEV
+- **复杂度评分**：规模3 / 难度3 / 数据2 / 依赖2 / 非功能4 / 风险3 → 总分17（中）
+- **PM 决策**：PM + ARCH + DEV + SEC + OPS
+
+#### Phase 1 安全加固（已完成）
+
+- **关键技术决策**：
+  1. `ForwardedProtoMiddleware`：自定义 ASGI 中间件修改 `scope["scheme"]`，解决 starlette-admin 子应用感知不到 HTTPS 的问题（根本原因：子应用有独立中间件链，外层 `add_middleware` 不传播）
+  2. bcrypt 密码：`ADMIN_PASSWORD` 改为 bcrypt hash（`$2b$12$...`），启动时校验不允许明文
+  3. 登录速率限制：内存 `defaultdict` 实现，10次/分钟/IP
+  4. Nginx 安全头：X-Frame-Options、CSP、HSTS、X-Permitted-Cross-Domain-Policies、server_tokens off
+  5. 日志脱敏扩展：覆盖 API Key、Token、Secret、Bearer、Fernet 加密串
+  6. `/push-log/{id}/preview` 端点加认证检查
+
+- **易错点**：
+  - docker compose `.env` 中 bcrypt hash 的 `$` 符号**不需要转义**，直接写原始 hash
+  - `https_only=True` 在 SessionMiddleware 中必须开启，但 Nginx→uvicorn 内部是 HTTP，需要 `ForwardedProtoMiddleware` 先修正 scheme
+  - starlette-admin 子应用的中间件隔离：必须在 ASGI scope 层面修改，不能依赖 FastAPI 的 `add_middleware`
+
+#### Phase 2 稳定性加固（已完成）
+
+- **关键技术决策**：
+  1. 网络重试：`_fetch_page()` 指数退避重试（1s/2s/4s），超时和 5xx 重试，4xx 不重试
+  2. 数据库事务隔离：失败日志改用独立 `AsyncSessionLocal` session 写入，避免主 session 脏状态污染
+  3. 推送失败告警：连续失败 3 次后发送告警邮件，成功后重置计数器（`_consecutive_failures` 内存字典）
+  4. 数据清理优化：快照 3 天清空（保留记录）、日志保留 30 天、清理后执行 VACUUM
+  5. 容器资源限制：app 1CPU/1GB，nginx 0.5CPU/256MB
+  6. 日志轮转：app 100m×10，nginx 50m×5
+  7. 健康检查增强：`/health` 验证 DB 连接和 scheduler 状态，异常返回 503
+  8. 启动时密钥校验：`_validate_secrets()` 拒绝默认值和明文密码启动
+
+- **改动文件**：`backend/app.py`、`backend/admin/views.py`、`backend/tasks/scheduler.py`、`backend/services/news_crawler.py`、`nginx/conf.d/app.conf`、`docker-compose.yml`、`backend/utils/log_sanitizer.py`、`scripts/backup_db.sh`（新增）
+
+---
+
+### 阶段性方案回顾评审 - 2026-02-21
+
+**评审结论（ARCH 综合）：**
+
+| 维度 | 评分 |
+|------|------|
+| 功能完整性 | 8/10 |
+| 代码质量 | 7.5/10 |
+| 安全性 | 7/10 |
+| 可靠性 | 6.5/10 |
+| 可维护性 | 7/10 |
+| 运维就绪度 | 6/10 |
+| **整体** | **7/10 — Beta 阶段** |
+
+**下一阶段 Top 5 优先级：**
+
+1. 🔴 P1：新闻源健康检查机制（每天自动验证 CSS 选择器有效性）
+2. 🔴 P1：多 SMTP 配置 + 故障转移（消除 SMTP 单点故障）
+3. 🟡 P2：数据库自动备份接入 cron（ECS 上配置 `backup_db.sh`）
+4. 🟡 P2：管理后台配置验证按钮（NewsSource/FinanceItem 保存前实时验证）
+5. 🟡 P2：操作审计日志（记录所有管理后台增删改操作）
+
+**主要风险：** 外部依赖脆弱性（新闻源选择器、期货 API）、SMTP 单点故障、无外部监控系统、数据库无备份。
+
+---
+
+## 十、变更日志
+
+### 2026-02-21 安全加固 Phase 1 + 稳定性加固 Phase 2
+
+| 文件 | 改动 |
+|------|------|
+| `backend/app.py` | 新增 `_validate_secrets()` 启动校验；新增 `ForwardedProtoMiddleware`；Session Cookie 加 `https_only=True`、`same_site="strict"`；`/health` 增加 DB 和 scheduler 状态检查；`/push-log/{id}/preview` 加认证 |
+| `backend/admin/views.py` | 登录支持 bcrypt hash；接入速率限制；完善登录日志 |
+| `backend/tasks/scheduler.py` | 新增 `_consecutive_failures` 计数器和 `_send_failure_alert()`；失败日志改用独立 session；清理策略优化（快照3天、日志30天、VACUUM） |
+| `backend/services/news_crawler.py` | `_fetch_page()` 增加指数退避重试（3次，1s/2s/4s） |
+| `nginx/conf.d/app.conf` | 新增 HSTS、`server_tokens off`、`X-Permitted-Cross-Domain-Policies` |
+| `docker-compose.yml` | 新增容器资源限制（CPU/内存）、日志轮转配置 |
+| `backend/utils/log_sanitizer.py` | 扩展脱敏规则：API Key、Token、Secret、Bearer、Fernet |
+| `scripts/backup_db.sh` | 新增 SQLite 热备份脚本（保留30天，支持 cron） |
 
 ---
 

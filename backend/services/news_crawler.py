@@ -101,15 +101,37 @@ def _extract_links(html: str, base_url: str, selector: str) -> list[tuple[str, s
     return results
 
 
-async def _fetch_page(client: httpx.AsyncClient, url: str) -> str:
-    """带 SSRF 防护的 HTTP 请求，返回 HTML 字符串"""
+async def _fetch_page(client: httpx.AsyncClient, url: str, retries: int = 3) -> str:
+    """带 SSRF 防护和指数退避重试的 HTTP 请求，返回 HTML 字符串
+
+    网络超时或服务器 5xx 错误时自动重试（最多 retries 次），
+    重试间隔：1s → 2s → 4s（指数退避）。
+    4xx 客户端错误不重试，直接抛出。
+    """
     validate_url(url)
-    resp = await client.get(url, timeout=20.0, follow_redirects=True)
-    resp.raise_for_status()
-    # 处理 GBK/GB2312 等中文编码
-    if resp.encoding and resp.encoding.upper() not in ("UTF-8", "UTF8"):
-        return resp.content.decode(resp.encoding, errors="replace")
-    return resp.text
+    last_exc: Exception = RuntimeError("未知错误")
+    for attempt in range(retries):
+        try:
+            resp = await client.get(url, timeout=20.0, follow_redirects=True)
+            resp.raise_for_status()
+            if resp.encoding and resp.encoding.upper() not in ("UTF-8", "UTF8"):
+                return resp.content.decode(resp.encoding, errors="replace")
+            return resp.text
+        except (httpx.TimeoutException, httpx.NetworkError) as e:
+            last_exc = e
+            if attempt < retries - 1:
+                wait = 2 ** attempt
+                logger.warning("请求超时/网络错误（第%d次），%ds后重试: %s - %s", attempt + 1, wait, url, e)
+                await asyncio.sleep(wait)
+        except httpx.HTTPStatusError as e:
+            if e.response.status_code >= 500 and attempt < retries - 1:
+                last_exc = e
+                wait = 2 ** attempt
+                logger.warning("服务器错误 %d（第%d次），%ds后重试: %s", e.response.status_code, attempt + 1, wait, url)
+                await asyncio.sleep(wait)
+            else:
+                raise
+    raise last_exc
 
 
 def _extract_summary(html: str, max_chars: int = 140) -> str:

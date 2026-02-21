@@ -20,9 +20,32 @@ setup_log_sanitizer()
 logger = logging.getLogger(__name__)
 
 
+def _validate_secrets() -> None:
+    """启动时校验关键密钥，防止使用默认值或空值上线"""
+    errors = []
+    if not settings.secret_key or settings.secret_key == "dev-secret-key-change-in-production":
+        errors.append("SECRET_KEY 未配置或使用默认值，请在 .env 中设置强随机密钥")
+    if not settings.fernet_key:
+        errors.append(
+            "FERNET_KEY 未配置，请运行以下命令生成并写入 .env：\n"
+            "  python -c 'from cryptography.fernet import Fernet; print(Fernet.generate_key().decode())'"
+        )
+    if not settings.admin_password or settings.admin_password == "admin123":
+        errors.append(
+            "ADMIN_PASSWORD 未配置或使用默认值，请运行以下命令生成 bcrypt hash 并写入 .env：\n"
+            "  python -c 'import bcrypt; print(bcrypt.hashpw(b\"your_password\", bcrypt.gensalt(12)).decode())'"
+        )
+    elif not settings.admin_password.startswith("$2b$"):
+        errors.append("ADMIN_PASSWORD 必须是 bcrypt hash（以 $2b$ 开头），不允许明文密码")
+    if errors:
+        msg = "\n".join(f"  - {e}" for e in errors)
+        raise RuntimeError(f"启动失败，安全配置不合规：\n{msg}")
+
+
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     # 启动
+    _validate_secrets()
     os.makedirs("data", exist_ok=True)
     os.makedirs("logs", exist_ok=True)
     await init_db()
@@ -74,7 +97,8 @@ app.add_middleware(
     secret_key=settings.secret_key,
     session_cookie="admin_session",
     max_age=86400,  # 24h
-    https_only=False,
+    https_only=True,   # 仅通过 HTTPS 传输 Cookie
+    same_site="strict",  # 防止 CSRF
 )
 
 # 最外层：修正 scope["scheme"]，使所有子应用（含 starlette-admin）感知真实协议
@@ -88,7 +112,24 @@ admin.mount_to(app)
 
 @app.get("/health")
 async def health():
-    return {"status": "ok"}
+    """健康检查：验证数据库连接和定时任务状态"""
+    from sqlalchemy import text
+    db_ok = False
+    try:
+        async with AsyncSessionLocal() as db:
+            await db.execute(text("SELECT 1"))
+        db_ok = True
+    except Exception:
+        pass
+
+    scheduler_ok = scheduler.running
+
+    if not db_ok or not scheduler_ok:
+        return JSONResponse(
+            status_code=503,
+            content={"status": "degraded", "db": db_ok, "scheduler": scheduler_ok},
+        )
+    return {"status": "ok", "db": True, "scheduler": True}
 
 
 @app.get("/push-log/{log_id}/preview", response_class=HTMLResponse)

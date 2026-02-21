@@ -5,6 +5,7 @@ from contextlib import asynccontextmanager
 
 from fastapi import FastAPI
 from fastapi.responses import HTMLResponse
+from starlette.middleware.proxy_headers import ProxyHeadersMiddleware
 from starlette.middleware.sessions import SessionMiddleware
 
 from backend.config import settings
@@ -35,12 +36,15 @@ async def lifespan(app: FastAPI):
 
 app = FastAPI(title="行业新闻机器人", lifespan=lifespan)
 
+# 信任 Nginx 传递的 X-Forwarded-Proto 头，使 request.url 反映真实协议（https）
+app.add_middleware(ProxyHeadersMiddleware, trusted_hosts="*")
+
 app.add_middleware(
     SessionMiddleware,
     secret_key=settings.secret_key,
     session_cookie="admin_session",
     max_age=86400,  # 24h
-    https_only=False,  # 生产环境设为 True（HTTPS）
+    https_only=True,  # Cookie 仅通过 HTTPS 传输
 )
 
 # 挂载 starlette-admin

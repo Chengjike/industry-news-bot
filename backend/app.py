@@ -43,7 +43,7 @@ app.add_middleware(
     secret_key=settings.secret_key,
     session_cookie="admin_session",
     max_age=86400,  # 24h
-    https_only=True,  # Cookie 仅通过 HTTPS 传输
+    https_only=False,  # Nginx 已处理 HTTPS，内部 HTTP 传输无需 Secure 标志
 )
 
 # 最后 add = 最先执行：信任 Nginx 的 X-Forwarded-Proto，使 request.url 反映真实 https:// 协议

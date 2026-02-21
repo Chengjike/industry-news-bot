@@ -36,9 +36,8 @@ async def lifespan(app: FastAPI):
 
 app = FastAPI(title="行业新闻机器人", lifespan=lifespan)
 
-# 信任 Nginx 传递的 X-Forwarded-Proto 头，使 request.url 反映真实协议（https）
-app.add_middleware(ProxyHeadersMiddleware, trusted_hosts="*")
-
+# 注意：add_middleware 是 LIFO 顺序，最后 add 的最先执行
+# SessionMiddleware 先 add，ProxyHeadersMiddleware 后 add，确保代理头在 session 处理前已解析
 app.add_middleware(
     SessionMiddleware,
     secret_key=settings.secret_key,
@@ -46,6 +45,9 @@ app.add_middleware(
     max_age=86400,  # 24h
     https_only=True,  # Cookie 仅通过 HTTPS 传输
 )
+
+# 最后 add = 最先执行：信任 Nginx 的 X-Forwarded-Proto，使 request.url 反映真实 https:// 协议
+app.add_middleware(ProxyHeadersMiddleware, trusted_hosts="*")
 
 # 挂载 starlette-admin
 from backend.admin.views import create_admin  # noqa: E402

@@ -1,7 +1,7 @@
 """starlette-admin 管理界面配置"""
 import bcrypt
 from starlette.requests import Request
-from starlette.responses import Response
+from starlette.responses import Response, RedirectResponse
 from starlette_admin import action
 from starlette_admin.contrib.sqla import Admin, ModelView
 from starlette_admin.auth import AdminUser, AuthProvider
@@ -34,7 +34,9 @@ class SingleAdminAuthProvider(AuthProvider):
             if password != stored:
                 raise LoginFailed("用户名或密码错误")
         request.session.update({"username": username})
-        return response
+        # 强制重定向到 https://，避免 Nginx 反向代理下 http:// 重定向导致 cookie 丢失
+        redirect_url = str(request.url_for("admin:index")).replace("http://", "https://", 1)
+        return RedirectResponse(url=redirect_url, status_code=303)
 
     async def is_authenticated(self, request: Request) -> bool:
         return request.session.get("username") == settings.admin_username

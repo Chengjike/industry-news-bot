@@ -124,6 +124,24 @@ ARCH 牵头打分，PM 最终核定等级（6-12低 / 13-20中 / 21-30高），�
 ## 八、历史决策记录
 此处按时间倒序记录所有历史决策。每次新功能完成后按第七节模板追加。
 
+### 新闻源健康检查机制 - 2026-02-21
+
+- **功能描述**：为每个新闻源增加健康状态监控，支持每日自动检查（06:00）和 Admin 手动触发，连续失败 ≥3 次发送告警邮件。
+- **评估参与人**：ARCH, DEV, QA
+- **复杂度评分**：规模3 / 难度3 / 数据2 / 依赖2 / 非功能3 / 风险2 → 总分15（中）
+- **PM 决策**：PM + ARCH + DEV + QC，采用方案C（自动检查 + 手动按钮）
+- **关键技术决策**：
+  - 失败只更新状态字段，**不影响推送任务**（与推送失败计数器完全独立）
+  - 并发检查（`asyncio.Semaphore(5)`），避免串行检查慢源阻塞整体
+  - ORM 实例不跨 session 使用：`_check_and_save` 接收基础属性而非 ORM 对象，每次写入用独立 session
+  - Admin 颜色徽章：通过 `serialize_field_value` 覆盖渲染，与 `PushLogView` 保持一致的实现模式
+  - 告警邮件复用 `_send_failure_alert` 模式（与推送失败告警相同的 FastMail 实现）
+- **易错点与最佳实践**：
+  - `check_one_source` 接收的是轻量 proxy 对象，不是 ORM 实例，避免 `DetachedInstanceError`
+  - `consecutive_failures` 在 `check_sources_by_ids`（手动）和 `run_health_check_all`（自动）中均维护，成功时重置为 0
+  - `health_status` 字段默认值 `unknown`，新建源未检查前显示「未知」徽章
+- **改动文件**：`models/news_source.py`、`database.py`、`services/source_health_checker.py`（新建）、`admin/views.py`、`tasks/scheduler.py`
+
 ### Admin 登录失败修复（HTTPS 反向代理 session 丢失） - 2026-02-21
 
 - **功能描述**：修复 ECS HTTPS 环境下 Admin 登录后跳回登录页的问题。
@@ -289,6 +307,16 @@ ARCH 牵头打分，PM 最终核定等级（6-12低 / 13-20中 / 21-30高），�
 | `docker-compose.yml` | 新增容器资源限制（CPU/内存）、日志轮转配置 |
 | `backend/utils/log_sanitizer.py` | 扩展脱敏规则：API Key、Token、Secret、Bearer、Fernet |
 | `scripts/backup_db.sh` | 新增 SQLite 热备份脚本（保留30天，支持 cron） |
+
+### 2026-02-21 新闻源健康检查机制
+
+| 文件 | 改动 |
+|------|------|
+| `backend/models/news_source.py` | 新增 4 个健康检查字段：`health_status`（unknown/healthy/warning/error）、`last_check_at`、`last_error`、`consecutive_failures` |
+| `backend/database.py` | 新增 4 条 `ALTER TABLE` 迁移语句，应用启动时自动执行 |
+| `backend/services/source_health_checker.py` | 新建健康检查服务：`check_one_source()`（10s 超时）、`run_health_check_all()`（并发=5）、`check_sources_by_ids()`（Admin 按钮调用）、`_send_health_alert()`（连续失败≥3次告警） |
+| `backend/admin/views.py` | `NewsSourceView` 新增健康状态只读字段 + `serialize_field_value` 渲染颜色徽章 + 「测试健康状态」Action 按钮 |
+| `backend/tasks/scheduler.py` | 注册每日 06:00 `run_health_check_all` 定时任务 |
 
 ---
 

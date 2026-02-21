@@ -139,6 +139,18 @@ class NewsSourceView(ModelView):
         IntegerField("consecutive_failures", label="连续失败次数", exclude_from_create=True, exclude_from_edit=True),
     ]
 
+    async def serialize_field_value(self, obj, field_name: str, request):
+        """健康状态列渲染颜色徽章"""
+        if field_name == "health_status":
+            badge = {
+                "healthy": '<span class="badge bg-success">✓ 正常</span>',
+                "warning": '<span class="badge bg-warning text-dark">⚠ 警告</span>',
+                "error":   '<span class="badge bg-danger">✗ 异常</span>',
+                "unknown": '<span class="badge bg-secondary">? 未知</span>',
+            }
+            return badge.get(obj.health_status or "unknown", obj.health_status)
+        return await super().serialize_field_value(obj, field_name, request)
+
     @action(
         name="health_check",
         text="测试健康状态",

@@ -8,6 +8,7 @@
 - 连续失败 ≥3 次 → 发送告警邮件
 - 失败只更新状态，不影响推送任务
 """
+import asyncio
 import logging
 from datetime import datetime, timezone
 
@@ -22,13 +23,17 @@ logger = logging.getLogger(__name__)
 
 _HEALTH_TIMEOUT = 10.0
 _ALERT_THRESHOLD = 3
+_MAX_CONCURRENCY = 5  # 最多同时检查 5 个源，避免网络拥塞
 
 
 async def check_one_source(source: NewsSource) -> tuple[str, str | None]:
     """检查单个新闻源，返回 (status, error_msg)"""
     selector = source.link_selector or "a"
     try:
-        async with httpx.AsyncClient(follow_redirects=True) as client:
+        async with httpx.AsyncClient(
+            follow_redirects=True,
+            headers={"User-Agent": "Mozilla/5.0 (compatible; NewsBot/1.0)"},
+        ) as client:
             resp = await client.get(source.url, timeout=_HEALTH_TIMEOUT)
             resp.raise_for_status()
         soup = BeautifulSoup(resp.text, "html.parser")
@@ -45,75 +50,96 @@ async def check_one_source(source: NewsSource) -> tuple[str, str | None]:
         return "error", str(e)[:200]
 
 
-async def run_health_check_all() -> None:
-    """检查所有新闻源健康状态，更新数据库，连续失败达阈值时发告警"""
+async def _check_and_save(source_id: int, source_name: str, source_url: str,
+                          source_link_selector: str | None) -> dict:
+    """检查单个源并将结果写入数据库，返回结果 dict"""
+    # 构造轻量对象用于检查（避免跨 session 使用 ORM 实例）
+    class _SourceProxy:
+        id = source_id
+        name = source_name
+        url = source_url
+        link_selector = source_link_selector
+
+    status, error_msg = await check_one_source(_SourceProxy())  # type: ignore[arg-type]
+    now = datetime.now(timezone.utc)
+
     async with AsyncSessionLocal() as db:
-        result = await db.execute(select(NewsSource))
-        sources = result.scalars().all()
-
-    logger.info("开始健康检查，共 %d 个新闻源", len(sources))
-
-    for source in sources:
-        status, error_msg = await check_one_source(source)
-        now = datetime.now(timezone.utc)
-
-        async with AsyncSessionLocal() as db:
-            src = await db.get(NewsSource, source.id)
-            if not src:
-                continue
-
+        src = await db.get(NewsSource, source_id)
+        if src:
             src.health_status = status
             src.last_check_at = now
             src.last_error = error_msg
-
             if status == "error":
                 src.consecutive_failures = (src.consecutive_failures or 0) + 1
             else:
                 src.consecutive_failures = 0
-
+            failures = src.consecutive_failures
             await db.commit()
+        else:
+            failures = 0
 
-            if status == "error" and src.consecutive_failures >= _ALERT_THRESHOLD:
-                await _send_health_alert(src.name, src.url, error_msg or "", src.consecutive_failures)
+    logger.info("健康检查 [%s] → %s%s", source_name, status,
+                f" ({error_msg})" if error_msg else "")
 
-        logger.info("健康检查 [%s] → %s%s", source.name, status,
-                    f" ({error_msg})" if error_msg else "")
+    if status == "error" and failures >= _ALERT_THRESHOLD:
+        await _send_health_alert(source_name, source_url, error_msg or "", failures)
+
+    return {"id": source_id, "name": source_name, "status": status, "error": error_msg}
+
+
+async def run_health_check_all() -> None:
+    """并发检查所有新闻源健康状态（最多 _MAX_CONCURRENCY 个并发）"""
+    async with AsyncSessionLocal() as db:
+        result = await db.execute(select(
+            NewsSource.id, NewsSource.name, NewsSource.url, NewsSource.link_selector
+        ))
+        rows = result.fetchall()
+
+    if not rows:
+        logger.info("无新闻源，跳过健康检查")
+        return
+
+    logger.info("开始健康检查，共 %d 个新闻源（并发=%d）", len(rows), _MAX_CONCURRENCY)
+
+    semaphore = asyncio.Semaphore(_MAX_CONCURRENCY)
+
+    async def _guarded(row):
+        async with semaphore:
+            return await _check_and_save(row.id, row.name, row.url, row.link_selector)
+
+    results = await asyncio.gather(*[_guarded(row) for row in rows], return_exceptions=True)
+
+    ok = sum(1 for r in results if isinstance(r, dict) and r["status"] == "healthy")
+    warn = sum(1 for r in results if isinstance(r, dict) and r["status"] == "warning")
+    err = sum(1 for r in results if isinstance(r, dict) and r["status"] == "error")
+    logger.info("健康检查完成：正常=%d 警告=%d 异常=%d", ok, warn, err)
 
 
 async def check_sources_by_ids(source_ids: list[int]) -> list[dict]:
     """手动检查指定新闻源，返回结果列表（供 Admin 按钮调用）"""
-    results = []
-    for sid in source_ids:
-        async with AsyncSessionLocal() as db:
-            source = await db.get(NewsSource, sid)
-            if not source:
-                continue
+    if not source_ids:
+        return []
 
-            status, error_msg = await check_one_source(source)
-            now = datetime.now(timezone.utc)
+    async with AsyncSessionLocal() as db:
+        result = await db.execute(
+            select(NewsSource.id, NewsSource.name, NewsSource.url, NewsSource.link_selector)
+            .where(NewsSource.id.in_(source_ids))
+        )
+        rows = {row.id: row for row in result.fetchall()}
 
-            source.health_status = status
-            source.last_check_at = now
-            source.last_error = error_msg
+    tasks = [
+        _check_and_save(sid, rows[sid].name, rows[sid].url, rows[sid].link_selector)
+        for sid in source_ids if sid in rows
+    ]
+    results = await asyncio.gather(*tasks, return_exceptions=True)
 
-            if status == "error":
-                source.consecutive_failures = (source.consecutive_failures or 0) + 1
-            else:
-                source.consecutive_failures = 0
-
-            await db.commit()
-
-            if status == "error" and source.consecutive_failures >= _ALERT_THRESHOLD:
-                await _send_health_alert(source.name, source.url, error_msg or "", source.consecutive_failures)
-
-            results.append({
-                "id": sid,
-                "name": source.name,
-                "status": status,
-                "error": error_msg,
-            })
-
-    return results
+    output = []
+    for r in results:
+        if isinstance(r, dict):
+            output.append(r)
+        else:
+            logger.error("手动健康检查异常: %s", r)
+    return output
 
 
 async def _send_health_alert(name: str, url: str, error_msg: str, count: int) -> None:

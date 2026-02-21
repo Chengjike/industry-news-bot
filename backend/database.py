@@ -46,3 +46,31 @@ async def init_db():
             ))
         except Exception:
             pass  # 列已存在，忽略
+
+        try:
+            await conn.execute(text(
+                "ALTER TABLE news_source ADD COLUMN health_status VARCHAR(20) DEFAULT 'unknown' NOT NULL"
+            ))
+        except Exception:
+            pass
+
+        try:
+            await conn.execute(text(
+                "ALTER TABLE news_source ADD COLUMN last_check_at DATETIME"
+            ))
+        except Exception:
+            pass
+
+        try:
+            await conn.execute(text(
+                "ALTER TABLE news_source ADD COLUMN last_error TEXT"
+            ))
+        except Exception:
+            pass
+
+        try:
+            await conn.execute(text(
+                "ALTER TABLE news_source ADD COLUMN consecutive_failures INTEGER DEFAULT 0 NOT NULL"
+            ))
+        except Exception:
+            pass

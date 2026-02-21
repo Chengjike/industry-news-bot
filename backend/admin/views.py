@@ -129,7 +129,34 @@ class NewsSourceView(ModelView):
             required=True,
         ),
         IntegerField("industry_id", label="所属行业 ID", required=True),
+        EnumField(
+            "health_status", label="健康状态",
+            choices=[("unknown", "未知"), ("healthy", "正常"), ("warning", "警告"), ("error", "异常")],
+            exclude_from_create=True, exclude_from_edit=True,
+        ),
+        DateTimeField("last_check_at", label="最近检查时间", exclude_from_create=True, exclude_from_edit=True),
+        StringField("last_error", label="最近错误", exclude_from_create=True, exclude_from_edit=True),
+        IntegerField("consecutive_failures", label="连续失败次数", exclude_from_create=True, exclude_from_edit=True),
     ]
+
+    @action(
+        name="health_check",
+        text="测试健康状态",
+        confirmation="确认立即检查所选新闻源的可访问性？结果将更新到「健康状态」列。",
+        submit_btn_text="开始检查",
+        submit_btn_class="btn-info",
+    )
+    async def health_check_action(self, request: Request, pks: list) -> str:
+        from backend.services.source_health_checker import check_sources_by_ids
+        results = await check_sources_by_ids([int(pk) for pk in pks])
+        lines = []
+        for r in results:
+            status_label = {"healthy": "✓ 正常", "warning": "⚠ 警告", "error": "✗ 异常"}.get(r["status"], r["status"])
+            line = f"{r['name']}: {status_label}"
+            if r["error"]:
+                line += f"（{r['error']}）"
+            lines.append(line)
+        return "健康检查完成：" + "；".join(lines)
 
 
 class FinanceItemView(ModelView):

@@ -365,3 +365,13 @@ async def reload_schedules() -> None:
         replace_existing=True,
     )
     logger.info("注册每日清理任务: 02:00 (保留 7 天数据)")
+
+    # 注册每日 06:00 新闻源健康检查任务
+    from backend.services.source_health_checker import run_health_check_all
+    scheduler.add_job(
+        run_health_check_all,
+        trigger=CronTrigger(hour=6, minute=0, timezone="Asia/Shanghai"),
+        id="daily_health_check",
+        replace_existing=True,
+    )
+    logger.info("注册每日健康检查任务: 06:00")

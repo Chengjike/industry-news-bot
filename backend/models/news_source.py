@@ -17,10 +17,15 @@ class NewsSource(Base):
     industry_id: Mapped[int] = mapped_column(ForeignKey("industry.id"), nullable=False)
     name: Mapped[str] = mapped_column(String(200), nullable=False)
     url: Mapped[str] = mapped_column(String(500), nullable=False)
-    link_selector: Mapped[Optional[str]] = mapped_column(String(200), nullable=True)  # CSS 选择器，如 'a.title'，留空则用 'a'
+    link_selector: Mapped[Optional[str]] = mapped_column(String(200), nullable=True)
     weight: Mapped[int] = mapped_column(Integer, default=5)  # 1-10
-    keywords: Mapped[Optional[str]] = mapped_column(Text, nullable=True)  # "+必须词 !排除词 普通词"
-    language: Mapped[str] = mapped_column(String(10), default="zh", nullable=False)  # 语言代码：zh=中文, en=英文
+    keywords: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
+    language: Mapped[str] = mapped_column(String(10), default="zh", nullable=False)
+    # 健康检查字段
+    health_status: Mapped[str] = mapped_column(String(20), default="unknown", nullable=False)  # unknown/healthy/warning/error
+    last_check_at: Mapped[Optional[datetime]] = mapped_column(DateTime, nullable=True)
+    last_error: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
+    consecutive_failures: Mapped[int] = mapped_column(Integer, default=0, nullable=False)
     created_at: Mapped[datetime] = mapped_column(DateTime, server_default=func.now())
 
     industry: Mapped["Industry"] = relationship("Industry", back_populates="news_sources")

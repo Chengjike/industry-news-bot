@@ -133,12 +133,13 @@ ARCH 牵头打分，PM 最终核定等级（6-12低 / 13-20中 / 21-30高），�
   - FastAPI 的 `add_middleware` 对 `mount_to()` 挂载的子应用**不生效**，必须修改底层 `scope`。
   - `ProxyHeadersMiddleware`（starlette 内置）在旧版本不存在，需自行实现。
   - `https_only=False`：Nginx→uvicorn 是内部 HTTP，Secure cookie 在此链路无法传递。
+  - **docker compose `.env` 中 `$` 必须写成 `$$`**：bcrypt hash 含多个 `$`，不转义会被 compose 展开为空变量，导致 `Invalid salt` 错误。在 ECS 上写入 `.env` 时需用 Python 处理，避免 shell 展开。
 - **多轮修复的教训**：
   - **先确认 ECS 环境版本**，再选用依赖库的功能，避免用了不存在的模块。
   - **commit 后立即 push**，部署前确认 `git log` 版本一致，否则 ECS 拉到旧代码浪费调试轮次。
   - **隔离变量诊断**：先用 `docker exec` 直接测 uvicorn（绕过 Nginx），确认问题层级再修复。
   - **starlette-admin 子应用中间件隔离**：挂载的子应用有独立中间件链，外层中间件不透传。
-- **改动文件**：`backend/app.py`（新增 `ForwardedProtoMiddleware`）、`nginx/conf.d/app.conf`（新增 `proxy_redirect`）
+- **改动文件**：`backend/app.py`（`ForwardedProtoMiddleware`、登录速率限制）、`nginx/conf.d/app.conf`（安全响应头、`proxy_redirect`）、`backend/admin/views.py`（登录审计日志）、`backend/utils/log_sanitizer.py`（补充 API Key 脱敏）
 
 ### 晚报金融数据推送（时间戳 + 期货数据修复） - 2026-02-20
 

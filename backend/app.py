@@ -33,16 +33,32 @@ async def lifespan(app: FastAPI):
     logger.info("应用关闭")
 
 
+class ForwardedProtoMiddleware:
+    """读取 X-Forwarded-Proto 头，修正 scope['scheme']，使子应用感知真实协议"""
+    def __init__(self, app):
+        self.app = app
+
+    async def __call__(self, scope, receive, send):
+        if scope["type"] in ("http", "websocket"):
+            headers = dict(scope.get("headers", []))
+            proto = headers.get(b"x-forwarded-proto", b"").decode()
+            if proto in ("https", "http"):
+                scope["scheme"] = proto
+        await self.app(scope, receive, send)
+
+
 app = FastAPI(title="行业新闻机器人", lifespan=lifespan)
 
-# 注意：add_middleware 是 LIFO 顺序，最后 add 的最先执行
 app.add_middleware(
     SessionMiddleware,
     secret_key=settings.secret_key,
     session_cookie="admin_session",
     max_age=86400,  # 24h
-    https_only=False,  # Nginx 已处理 HTTPS，内部 HTTP 传输无需 Secure 标志
+    https_only=False,
 )
+
+# 最外层：修正 scope["scheme"]，使所有子应用（含 starlette-admin）感知真实协议
+app.add_middleware(ForwardedProtoMiddleware)
 
 # 挂载 starlette-admin
 from backend.admin.views import create_admin  # noqa: E402

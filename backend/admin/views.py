@@ -34,11 +34,7 @@ class SingleAdminAuthProvider(AuthProvider):
             if password != stored:
                 raise LoginFailed("用户名或密码错误")
         request.session.update({"username": username})
-        # 通过 X-Forwarded-Proto 判断真实协议，避免 Nginx 反向代理下 http:// 重定向导致 cookie 丢失
-        proto = request.headers.get("x-forwarded-proto", request.url.scheme)
-        host = request.headers.get("host", request.url.hostname)
-        redirect_url = f"{proto}://{host}/admin/"
-        return RedirectResponse(url=redirect_url, status_code=303)
+        return response
 
     async def is_authenticated(self, request: Request) -> bool:
         return request.session.get("username") == settings.admin_username

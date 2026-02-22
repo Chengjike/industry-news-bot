@@ -1,7 +1,8 @@
 from datetime import datetime
-from typing import TYPE_CHECKING
+from datetime import datetime
+from typing import TYPE_CHECKING, Optional
 
-from sqlalchemy import DateTime, Integer, String, func
+from sqlalchemy import DateTime, Integer, String, Text, func
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from backend.database import Base
@@ -19,6 +20,7 @@ class Industry(Base):
     id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
     name: Mapped[str] = mapped_column(String(100), unique=True, nullable=False)
     top_n: Mapped[int] = mapped_column(Integer, default=10)
+    keywords: Mapped[Optional[str]] = mapped_column(Text, nullable=True)  # 行业级关键词过滤，格式同 NewsSource.keywords
     created_at: Mapped[datetime] = mapped_column(DateTime, server_default=func.now())
 
     news_sources: Mapped[list["NewsSource"]] = relationship(

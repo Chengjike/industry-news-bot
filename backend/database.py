@@ -74,3 +74,10 @@ async def init_db():
             ))
         except Exception:
             pass
+
+        try:
+            await conn.execute(text(
+                "ALTER TABLE industry ADD COLUMN keywords TEXT"
+            ))
+        except Exception:
+            pass

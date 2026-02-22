@@ -75,18 +75,28 @@ def _weight_score(weight: int) -> float:
     return max(0.1, min(1.0, weight / 10.0))
 
 
-def score_and_rank(items: list[NewsItem], top_n: int = 10) -> list[NewsItem]:
+def score_and_rank(items: list[NewsItem], top_n: int = 10,
+                   industry_keywords: str | None = None) -> list[NewsItem]:
     """
     对新闻列表打分、过滤、排序，返回 Top N 条。
 
     综合评分 = 时效性(0.4) + 来源权重(0.3) + 关键词(0.3)
+
+    industry_keywords: 行业级关键词（格式同 NewsSource.keywords），
+                       对标题+摘要做硬过滤，优先于来源关键词。
     """
     scored: list[tuple[float, NewsItem]] = []
 
     for item in items:
+        # 行业关键词硬过滤（标题 + 摘要）
+        if industry_keywords:
+            combined_text = (item.title or "") + " " + (item.summary or "")
+            if _keyword_score(combined_text, industry_keywords) is None:
+                continue
+
         kw_score = _keyword_score(item.title, item.keywords)
         if kw_score is None:
-            # 被关键词规则过滤
+            # 被来源关键词规则过滤
             continue
 
         t_score = _timeliness_score(item.published_at)

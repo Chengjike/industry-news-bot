@@ -69,6 +69,7 @@ class IndustryView(ModelView):
         IntegerField("id", label="ID", exclude_from_create=True, exclude_from_edit=True),
         StringField("name", label="行业名称", required=True),
         IntegerField("top_n", label="早报 Top N 条数"),
+        TextAreaField("keywords", label="行业关键词过滤（+必须 !排除 普通，留空不过滤）", required=False),
     ]
 
     @action(
@@ -289,7 +290,7 @@ class PushLogView(ModelView):
         """自定义字段序列化，为预览链接列生成 HTML"""
         if field_name == "_preview_link":
             if obj.html_snapshot:
-                preview_url = f"/push-log/{obj.id}/preview"
+                preview_url = f"/industry-news-bot/push-log/{obj.id}/preview"
                 return f'<a href="{preview_url}" target="_blank" class="btn btn-sm btn-info">查看内容</a>'
             else:
                 return '<span class="text-muted">无快照</span>'
@@ -339,6 +340,7 @@ def create_admin() -> Admin:
         engine,
         title="行业新闻机器人",
         auth_provider=SingleAdminAuthProvider(),
+        base_url="/admin",
     )
     admin.add_view(IndustryView(Industry))
     admin.add_view(NewsSourceView(NewsSource))

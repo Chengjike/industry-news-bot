@@ -135,7 +135,8 @@ async def run_morning_push(industry_id: int, triggered_by: str = "scheduler") ->
         try:
             raw_items = await crawl_sources(source_dicts, db)
             deduped = deduplicate(raw_items)
-            top_items = score_and_rank(deduped, top_n=industry.top_n)
+            top_items = score_and_rank(deduped, top_n=industry.top_n,
+                                       industry_keywords=industry.keywords)
             html_snapshot = await send_morning_report(
                 smtp_cfg, recipients, industry.name, top_items,
                 contact_email=smtp_cfg.contact_email or smtp_cfg.username,

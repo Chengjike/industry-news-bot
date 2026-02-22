@@ -90,7 +90,7 @@ class ForwardedProtoMiddleware:
         await self.app(scope, receive, send)
 
 
-app = FastAPI(title="行业新闻机器人", lifespan=lifespan)
+app = FastAPI(title="行业新闻机器人", lifespan=lifespan, root_path="/industry-news-bot")
 
 app.add_middleware(
     SessionMiddleware,

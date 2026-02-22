@@ -1,5 +1,4 @@
 from datetime import datetime
-from datetime import datetime
 from typing import TYPE_CHECKING, Optional
 
 from sqlalchemy import DateTime, Integer, String, Text, func

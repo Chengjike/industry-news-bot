@@ -340,7 +340,7 @@ def create_admin() -> Admin:
         engine,
         title="行业新闻机器人",
         auth_provider=SingleAdminAuthProvider(),
-        base_url="/admin",
+        base_url="/industry-news-bot/admin",
     )
     admin.add_view(IndustryView(Industry))
     admin.add_view(NewsSourceView(NewsSource))

@@ -124,6 +124,25 @@ ARCH 牵头打分，PM 最终核定等级（6-12低 / 13-20中 / 21-30高），�
 ## 八、历史决策记录
 此处按时间倒序记录所有历史决策。每次新功能完成后按第七节模板追加。
 
+### 行业关键词过滤 + 路径前缀重构 - 2026-02-22
+
+- **功能描述**：① 新闻推送前按行业关键词过滤无关内容；② 将管理后台路径从 `/admin` 改为 `/industry-news-bot/admin`，支持未来多服务扩展。
+- **评估参与人**：ARCH, DEV, QA
+- **复杂度评分**：规模2 / 难度3 / 数据2 / 依赖2 / 非功能3 / 风险3 → 总分15（中）
+- **PM 决策**：PM + ARCH + DEV + QC，两个功能均采用方案C
+- **关键技术决策**：
+  - 行业关键词 OR 语义：`+词` 列表中至少命中一个即通过（区别于来源关键词的 AND 语义）
+  - 行业关键词对标题+摘要做硬过滤，来源关键词仅对标题做加分过滤
+  - 路径前缀：Nginx `location /industry-news-bot/` + `proxy_pass http://app:8000`（不带末尾 `/`，完整路径透传）
+  - starlette-admin `base_url="/industry-news-bot/admin"`（完整路径，不依赖 FastAPI `root_path`）
+  - FastAPI 路由同步更新：`/health` → `/industry-news-bot/health`，`/push-log/{id}/preview` → `/industry-news-bot/push-log/{id}/preview`
+- **易错点与最佳实践**：
+  - `proxy_pass` 末尾带 `/` 会剥离前缀，不带 `/` 才能完整透传路径
+  - starlette-admin 子应用有独立中间件链，`root_path` 对其不生效，必须直接设置 `base_url`
+  - Nginx volume mount 配置变更后容器不会自动重载，需执行 `nginx -s reload` 或重启容器
+  - 未来部署统一使用 `bash /opt/news-bot/scripts/deploy.sh`（含自动 reload）
+- **改动文件**：`models/industry.py`（新增 keywords 字段）、`database.py`（迁移）、`services/news_ranking.py`（OR 过滤 + 统计日志）、`tasks/scheduler.py`（传入 industry.keywords）、`admin/views.py`（IndustryView 新增 keywords 字段 + base_url）、`app.py`（路由前缀）、`nginx/conf.d/app.conf`（路径前缀）、`scripts/deploy.sh`（新建）
+
 ### 新闻源健康检查机制 - 2026-02-21
 
 - **功能描述**：为每个新闻源增加健康状态监控，支持每日自动检查（06:00）和 Admin 手动触发，连续失败 ≥3 次发送告警邮件。

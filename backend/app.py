@@ -110,7 +110,7 @@ admin = create_admin()
 admin.mount_to(app)
 
 
-@app.get("/health")
+@app.get("/industry-news-bot/health")
 async def health():
     """健康检查：验证数据库连接和定时任务状态"""
     from sqlalchemy import text
@@ -132,7 +132,7 @@ async def health():
     return {"status": "ok", "db": True, "scheduler": True}
 
 
-@app.get("/push-log/{log_id}/preview", response_class=HTMLResponse)
+@app.get("/industry-news-bot/push-log/{log_id}/preview", response_class=HTMLResponse)
 async def push_log_preview(log_id: int, request: Request):
     """返回推送记录的邮件 HTML 快照（仅管理员可访问）"""
     from backend.admin.views import SingleAdminAuthProvider

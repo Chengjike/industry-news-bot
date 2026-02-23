@@ -36,8 +36,42 @@ jobs:
           key: ${{ secrets.ECS_SSH_KEY }}
           script: |
             set -e
+
+            # 进入部署目录
             cd ${{ secrets.DEPLOY_PATH }}
+
+            # 拉取最新代码
+            echo "==> 拉取最新代码..."
             git pull origin main
-            docker compose up -d --build
+
+            # 重建应用容器（只重建app服务，避免nginx中断）
+            echo "==> 重建应用容器..."
+            docker compose up -d --build app
+
+            # 等待应用启动完成
+            echo "==> 等待应用启动..."
+            sleep 10
+
+            # 重载Nginx配置（平滑重载，不中断连接）
+            echo "==> 重载 Nginx 配置..."
+            docker exec news_bot_nginx nginx -s reload
+
+            # 验证健康状态
+            echo "==> 验证健康状态..."
+            sleep 3
+            HEALTH_STATUS=$(curl -sk https://localhost/industry-news-bot/health || echo "failed")
+
+            if echo "$HEALTH_STATUS" | grep -q '"status":"ok"'; then
+              echo "✅ 健康检查通过"
+              echo "$HEALTH_STATUS"
+            else
+              echo "⚠️  健康检查失败，但部署已完成"
+              echo "$HEALTH_STATUS"
+            fi
+
+            # 显示容器状态
+            echo "==> 容器状态："
             docker compose ps
-            echo "部署完成"
+
+            echo ""
+            echo "==> 部署完成"

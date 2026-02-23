@@ -96,7 +96,7 @@ app.add_middleware(
     SessionMiddleware,
     secret_key=settings.secret_key,
     session_cookie="admin_session",
-    max_age=86400,  # 24h
+    max_age=7200,  # 2小时：会话超时后需重新登录
     https_only=True,   # 仅通过 HTTPS 传输 Cookie
     same_site="strict",  # 防止 CSRF
 )

@@ -36,15 +36,13 @@ class SingleAdminAuthProvider(AuthProvider):
             logger.warning("登录失败（用户名错误）: IP=%s, username=%s", ip, username)
             raise LoginFailed("用户名或密码错误")
         stored = settings.admin_password
-        # 支持 bcrypt hash（生产）和明文（开发）
-        if stored.startswith("$2b$"):
-            if not bcrypt.checkpw(password.encode(), stored.encode()):
-                logger.warning("登录失败（密码错误）: IP=%s", ip)
-                raise LoginFailed("用户名或密码错误")
-        else:
-            if password != stored:
-                logger.warning("登录失败（密码错误）: IP=%s", ip)
-                raise LoginFailed("用户名或密码错误")
+        # 只支持 bcrypt hash，不允许明文密码
+        if not stored.startswith("$2b$"):
+            logger.error("安全配置错误：ADMIN_PASSWORD 不是 bcrypt hash，禁止登录")
+            raise LoginFailed("系统配置错误，请联系管理员")
+        if not bcrypt.checkpw(password.encode(), stored.encode()):
+            logger.warning("登录失败（密码错误）: IP=%s", ip)
+            raise LoginFailed("用户名或密码错误")
         logger.info("登录成功: IP=%s, username=%s", ip, username)
         request.session.update({"username": username})
         return response

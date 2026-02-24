@@ -238,6 +238,25 @@ class PushScheduleView(ModelView):
         BooleanField("enabled", label="启用"),
     ]
 
+    async def before_create(self, request: Request, data: dict, obj: "PushSchedule") -> None:
+        """创建推送计划时，根据类型设置合理默认时间"""
+        push_type = data.get("push_type")
+        hour = data.get("hour")
+        # 如果hour未提供或为默认值9，根据push_type设置合理默认值
+        if hour is None or hour == 9:
+            if push_type == "evening":
+                data["hour"] = 18  # 晚报默认18:00
+                data["minute"] = data.get("minute", 0)
+            else:
+                data["hour"] = 9   # 早报默认9:00
+                data["minute"] = data.get("minute", 0)
+
+    async def before_edit(self, request: Request, data: dict, obj: "PushSchedule") -> None:
+        """编辑推送计划时，保持原有逻辑，主要为了数据一致性"""
+        # 如果用户修改了push_type，可能需要调整时间，但这里保持简单
+        # 主要依赖模型层的约束来确保时间合理性
+        pass
+
 
 class PushLogView(ModelView):
     """推送记录（只读）"""

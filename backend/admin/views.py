@@ -56,6 +56,128 @@ class SingleAdminAuthProvider(AuthProvider):
     async def logout(self, request: Request, response: Response) -> Response:
         request.session.clear()
         return response
+
+    async def render_login(self, request: Request, admin: "Admin" = None, error: str = None) -> Response:
+        """渲染自定义登录页面"""
+        from starlette.responses import HTMLResponse
+        import os
+        import re
+
+        # 记录信息
+        logger.info(f"渲染自定义登录页面，错误参数: {error}")
+        logger.info(f"请求URL: {request.url}")
+        logger.info(f"查询参数: {dict(request.query_params)}")
+
+        # 如果error参数为None，但查询参数中有error，使用查询参数
+        if error is None:
+            query_error = request.query_params.get('error')
+            if query_error:
+                error = query_error
+                logger.info(f"从查询参数获取错误消息: {error}")
+
+        # 读取静态模板文件
+        template_path = os.path.join(os.path.dirname(__file__), "..", "templates", "admin", "login_static.html")
+        logger.debug(f"静态模板路径: {template_path}")
+
+        if not os.path.exists(template_path):
+            logger.warning(f"静态模板不存在: {template_path}")
+            # 回退到默认实现，只传递request和error参数
+            return await super().render_login(request, error)
+
+        try:
+            # 读取静态HTML文件
+            with open(template_path, "r", encoding="utf-8") as f:
+                html_content = f.read()
+
+            logger.debug(f"成功读取静态模板文件，大小: {len(html_content)} 字节")
+
+            # 替换错误消息占位符
+            if error:
+                error_html = f'''
+                <div class="error-message" id="errorMessage" role="alert" aria-live="polite">
+                    {error}
+                </div>
+                <script>
+                    // 自动聚焦用户名输入框并添加错误样式和ARIA属性
+                    document.addEventListener('DOMContentLoaded', function() {{
+                        const usernameInput = document.getElementById('username');
+                        const passwordInput = document.getElementById('password');
+                        if (usernameInput) {{
+                            usernameInput.classList.add('error');
+                            usernameInput.setAttribute('aria-invalid', 'true');
+                            usernameInput.setAttribute('aria-describedby', 'errorMessage');
+                            usernameInput.focus();
+                        }}
+                        if (passwordInput) {{
+                            passwordInput.setAttribute('aria-invalid', 'true');
+                            passwordInput.setAttribute('aria-describedby', 'errorMessage');
+                        }}
+
+                        // 5秒后淡出错误消息
+                        setTimeout(function() {{
+                            const errorContainer = document.getElementById('errorContainer');
+                            if (errorContainer) {{
+                                const errorMsg = errorContainer.querySelector('.error-message');
+                                if (errorMsg) {{
+                                    errorMsg.style.transition = 'opacity 0.5s ease';
+                                    errorMsg.style.opacity = '0.5';
+                                }}
+                            }}
+                        }}, 5000);
+                    }});
+                </script>
+                '''
+
+                # 替换错误容器内容（保留外层div）
+                html_content = re.sub(
+                    r'<div id="errorContainer"></div>',
+                    f'<div id="errorContainer">{error_html}</div>',
+                    html_content,
+                    flags=re.DOTALL
+                )
+            else:
+                # 如果没有错误，隐藏错误容器
+                html_content = re.sub(
+                    r'<div id="errorContainer"></div>',
+                    '<div id="errorContainer" style="display: none;"></div>',
+                    html_content,
+                    flags=re.DOTALL
+                )
+
+            # 尝试获取CSRF令牌（如果可用）
+            # Starlette-Admin可能会在请求中提供csrf_token
+            # 这里我们简单处理，实际应该从表单上下文中获取
+            # 先尝试从查询参数获取（如果Starlette-Admin使用这种方式）
+            csrf_token = None
+            if hasattr(request, 'query_params'):
+                csrf_token = request.query_params.get('csrf_token')
+
+            # 如果有CSRF令牌，插入到表单中
+            if csrf_token:
+                csrf_field = f'<input type="hidden" name="csrf_token" value="{csrf_token}">'
+                # 在表单开始标签后插入
+                html_content = re.sub(
+                    r'(<form[^>]*method="POST"[^>]*>)',
+                    f'\\1\\n{csrf_field}',
+                    html_content,
+                    flags=re.IGNORECASE
+                )
+
+            # 确保表单action指向正确的URL
+            form_action = str(request.url.path)
+            html_content = re.sub(
+                r'<form[^>]*action="[^"]*"[^>]*>',
+                f'<form method="POST" action="{form_action}" id="loginForm">',
+                html_content,
+                flags=re.IGNORECASE
+            )
+
+            return HTMLResponse(html_content, media_type="text/html; charset=utf-8")
+
+        except Exception as e:
+            logger.error(f"自定义登录模板渲染失败: {e}", exc_info=True)
+            # 回退到默认实现
+            return await super().render_login(request, error)
 # ────────────────────────────────────────
 # ModelView 定义
 # ────────────────────────────────────────

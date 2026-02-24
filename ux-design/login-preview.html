@@ -1,0 +1,536 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>新闻机器人 - 登录界面设计预览</title>
+    <style>
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', 'PingFang SC', 'Hiragino Sans GB', 'Microsoft YaHei', sans-serif;
+        }
+
+        body {
+            background-color: #f8fafc;
+            color: #334155;
+            line-height: 1.5;
+            min-height: 100vh;
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            justify-content: center;
+            padding: 20px;
+        }
+
+        .preview-header {
+            text-align: center;
+            margin-bottom: 32px;
+            max-width: 800px;
+        }
+
+        .preview-header h1 {
+            color: #1e293b;
+            font-size: 1.75rem;
+            margin-bottom: 8px;
+        }
+
+        .preview-header p {
+            color: #64748b;
+            font-size: 0.95rem;
+        }
+
+        .preview-container {
+            display: flex;
+            flex-wrap: wrap;
+            gap: 32px;
+            justify-content: center;
+            align-items: flex-start;
+            max-width: 1000px;
+            width: 100%;
+        }
+
+        .login-card {
+            background: white;
+            border-radius: 16px;
+            padding: 32px;
+            box-shadow: 0 8px 24px rgba(0, 0, 0, 0.08);
+            width: 100%;
+            max-width: 400px;
+            border: 1px solid #f1f5f9;
+        }
+
+        .brand-header {
+            text-align: center;
+            margin-bottom: 28px;
+        }
+
+        .brand-logo {
+            display: inline-flex;
+            align-items: center;
+            justify-content: center;
+            width: 48px;
+            height: 48px;
+            background: linear-gradient(135deg, #2563eb, #3b82f6);
+            color: white;
+            border-radius: 12px;
+            margin-bottom: 16px;
+            font-size: 24px;
+        }
+
+        .brand-title {
+            font-size: 1.5rem;
+            font-weight: 700;
+            color: #1e293b;
+            margin-bottom: 4px;
+        }
+
+        .brand-subtitle {
+            font-size: 0.9rem;
+            color: #64748b;
+        }
+
+        .login-form {
+            margin-bottom: 20px;
+        }
+
+        .form-title {
+            font-size: 1.125rem;
+            font-weight: 600;
+            color: #1e293b;
+            margin-bottom: 20px;
+            padding-bottom: 12px;
+            border-bottom: 1px solid #f1f5f9;
+        }
+
+        .input-group {
+            margin-bottom: 16px;
+            position: relative;
+        }
+
+        .input-label {
+            display: block;
+            font-size: 0.875rem;
+            font-weight: 500;
+            color: #475569;
+            margin-bottom: 6px;
+        }
+
+        .input-wrapper {
+            position: relative;
+        }
+
+        .form-input {
+            width: 100%;
+            padding: 12px 16px 12px 44px;
+            border: 2px solid #e2e8f0;
+            border-radius: 10px;
+            font-size: 1rem;
+            color: #334155;
+            background-color: white;
+            transition: all 0.2s ease;
+        }
+
+        .form-input:focus {
+            outline: none;
+            border-color: #2563eb;
+            box-shadow: 0 0 0 3px rgba(37, 99, 235, 0.1);
+        }
+
+        .input-icon {
+            position: absolute;
+            left: 16px;
+            top: 50%;
+            transform: translateY(-50%);
+            color: #94a3b8;
+            font-size: 1.1rem;
+        }
+
+        .password-toggle {
+            position: absolute;
+            right: 16px;
+            top: 50%;
+            transform: translateY(-50%);
+            background: none;
+            border: none;
+            color: #94a3b8;
+            cursor: pointer;
+            padding: 4px;
+            font-size: 1.1rem;
+        }
+
+        .password-toggle:hover {
+            color: #64748b;
+        }
+
+        .remember-me {
+            display: flex;
+            align-items: center;
+            margin-bottom: 20px;
+        }
+
+        .remember-checkbox {
+            width: 18px;
+            height: 18px;
+            margin-right: 10px;
+            border: 2px solid #cbd5e1;
+            border-radius: 4px;
+            appearance: none;
+            cursor: pointer;
+            position: relative;
+        }
+
+        .remember-checkbox:checked {
+            background-color: #2563eb;
+            border-color: #2563eb;
+        }
+
+        .remember-checkbox:checked::after {
+            content: '✓';
+            position: absolute;
+            color: white;
+            font-size: 12px;
+            top: 50%;
+            left: 50%;
+            transform: translate(-50%, -50%);
+        }
+
+        .remember-label {
+            font-size: 0.875rem;
+            color: #475569;
+            cursor: pointer;
+        }
+
+        .login-button {
+            width: 100%;
+            padding: 14px;
+            background: linear-gradient(135deg, #2563eb, #3b82f6);
+            color: white;
+            border: none;
+            border-radius: 10px;
+            font-size: 1rem;
+            font-weight: 600;
+            cursor: pointer;
+            transition: all 0.2s ease;
+            margin-bottom: 16px;
+        }
+
+        .login-button:hover {
+            background: linear-gradient(135deg, #1d4ed8, #2563eb);
+            transform: translateY(-1px);
+            box-shadow: 0 4px 12px rgba(37, 99, 235, 0.2);
+        }
+
+        .footer-links {
+            text-align: center;
+            margin-top: 20px;
+            padding-top: 20px;
+            border-top: 1px solid #f1f5f9;
+        }
+
+        .link {
+            color: #2563eb;
+            text-decoration: none;
+            font-size: 0.875rem;
+        }
+
+        .link:hover {
+            text-decoration: underline;
+        }
+
+        .link-divider {
+            color: #cbd5e1;
+            margin: 0 12px;
+        }
+
+        .security-notice {
+            background: #f1f5f9;
+            border-radius: 8px;
+            padding: 14px;
+            margin-top: 20px;
+            font-size: 0.825rem;
+            color: #475569;
+        }
+
+        .security-title {
+            display: flex;
+            align-items: center;
+            gap: 6px;
+            margin-bottom: 6px;
+            font-weight: 500;
+        }
+
+        .design-specs {
+            flex: 1;
+            min-width: 300px;
+            max-width: 500px;
+            background: white;
+            border-radius: 12px;
+            padding: 24px;
+            box-shadow: 0 4px 12px rgba(0, 0, 0, 0.05);
+        }
+
+        .specs-section {
+            margin-bottom: 24px;
+        }
+
+        .specs-title {
+            font-size: 1.125rem;
+            font-weight: 600;
+            color: #1e293b;
+            margin-bottom: 12px;
+            padding-bottom: 8px;
+            border-bottom: 1px solid #f1f5f9;
+        }
+
+        .color-palette {
+            display: flex;
+            gap: 10px;
+            flex-wrap: wrap;
+            margin-bottom: 16px;
+        }
+
+        .color-item {
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+        }
+
+        .color-box {
+            width: 50px;
+            height: 50px;
+            border-radius: 8px;
+            margin-bottom: 6px;
+            border: 1px solid #e2e8f0;
+        }
+
+        .color-name {
+            font-size: 0.75rem;
+            color: #64748b;
+        }
+
+        .color-hex {
+            font-size: 0.75rem;
+            font-family: monospace;
+            color: #475569;
+        }
+
+        .state-preview {
+            display: flex;
+            gap: 12px;
+            flex-wrap: wrap;
+            margin-bottom: 20px;
+        }
+
+        .state-item {
+            flex: 1;
+            min-width: 120px;
+        }
+
+        .state-label {
+            font-size: 0.875rem;
+            color: #64748b;
+            margin-bottom: 6px;
+        }
+
+        .state-example {
+            padding: 10px 12px;
+            border-radius: 8px;
+            background: white;
+            border: 1px solid #e2e8f0;
+            font-size: 0.825rem;
+        }
+
+        .design-details {
+            font-size: 0.875rem;
+            color: #475569;
+        }
+
+        .design-details p {
+            margin-bottom: 8px;
+        }
+
+        @media (max-width: 768px) {
+            .preview-container {
+                flex-direction: column;
+            }
+
+            .login-card {
+                padding: 24px 20px;
+            }
+
+            .design-specs {
+                padding: 20px;
+            }
+        }
+    </style>
+</head>
+<body>
+    <div class="preview-header">
+        <h1>新闻机器人管理系统 - 登录界面设计</h1>
+        <p>高保真设计预览 | 版本 1.0 | 2026-02-24</p>
+    </div>
+
+    <div class="preview-container">
+        <!-- 登录卡片设计 -->
+        <div class="login-card">
+            <div class="brand-header">
+                <div class="brand-logo">🚀</div>
+                <div class="brand-title">新闻机器人管理系统</div>
+                <div class="brand-subtitle">智能行业资讯管理平台</div>
+            </div>
+
+            <div class="login-form">
+                <div class="form-title">登录</div>
+
+                <div class="input-group">
+                    <label class="input-label">用户名</label>
+                    <div class="input-wrapper">
+                        <span class="input-icon">👤</span>
+                        <input type="text" class="form-input" placeholder="请输入用户名" value="admin">
+                    </div>
+                </div>
+
+                <div class="input-group">
+                    <label class="input-label">密码</label>
+                    <div class="input-wrapper">
+                        <span class="input-icon">🔒</span>
+                        <input type="password" class="form-input" id="passwordInput" placeholder="请输入密码" value="••••••••">
+                        <button type="button" class="password-toggle" onclick="togglePassword()">👁️</button>
+                    </div>
+                </div>
+
+                <div class="remember-me">
+                    <input type="checkbox" class="remember-checkbox" id="rememberCheck" checked>
+                    <label for="rememberCheck" class="remember-label">记住登录状态（30天）</label>
+                </div>
+
+                <button class="login-button" onclick="simulateLogin()">
+                    登录
+                </button>
+
+                <div class="footer-links">
+                    <a href="#" class="link">忘记密码?</a>
+                    <span class="link-divider">|</span>
+                    <a href="#" class="link">首次使用?</a>
+                </div>
+
+                <div class="security-notice">
+                    <div class="security-title">ⓘ 安全提示</div>
+                    <div>上次登录: 2026-02-23 15:30 (IP: 192.168.1.100)</div>
+                </div>
+            </div>
+        </div>
+
+        <!-- 设计规范 -->
+        <div class="design-specs">
+            <div class="specs-section">
+                <h3 class="specs-title">设计规范</h3>
+                <div class="design-details">
+                    <p><strong>色彩体系:</strong></p>
+                    <div class="color-palette">
+                        <div class="color-item">
+                            <div class="color-box" style="background: #2563eb;"></div>
+                            <div class="color-name">主色</div>
+                            <div class="color-hex">#2563eb</div>
+                        </div>
+                        <div class="color-item">
+                            <div class="color-box" style="background: #f8fafc;"></div>
+                            <div class="color-name">背景</div>
+                            <div class="color-hex">#f8fafc</div>
+                        </div>
+                        <div class="color-item">
+                            <div class="color-box" style="background: #ffffff;"></div>
+                            <div class="color-name">卡片</div>
+                            <div class="color-hex">#ffffff</div>
+                        </div>
+                        <div class="color-item">
+                            <div class="color-box" style="background: #1e293b;"></div>
+                            <div class="color-name">标题</div>
+                            <div class="color-hex">#1e293b</div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+
+            <div class="specs-section">
+                <h3 class="specs-title">交互状态</h3>
+                <div class="state-preview">
+                    <div class="state-item">
+                        <div class="state-label">正常</div>
+                        <div class="state-example">
+                            <div style="color: #334155;">输入状态</div>
+                        </div>
+                    </div>
+                    <div class="state-item">
+                        <div class="state-label">焦点</div>
+                        <div class="state-example" style="border-color: #2563eb; box-shadow: 0 0 0 3px rgba(37, 99, 235, 0.1);">
+                            <div style="color: #2563eb;">焦点状态</div>
+                        </div>
+                    </div>
+                    <div class="state-item">
+                        <div class="state-label">错误</div>
+                        <div class="state-example" style="border-color: #ef4444;">
+                            <div style="color: #ef4444;">错误状态</div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+
+            <div class="specs-section">
+                <h3 class="specs-title">关键特性</h3>
+                <div class="design-details">
+                    <p>• 自动聚焦用户名输入框</p>
+                    <p>• 智能回车键导航（用户名单 → 密码）</p>
+                    <p>• 密码可见性切换（👁️ 图标）</p>
+                    <p>• 记住登录状态（30天选项）</p>
+                    <p>• 安全提示显示上次登录信息</p>
+                    <p>• 响应式设计（桌面/平板/手机）</p>
+                    <p>• 现代简约设计语言</p>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <script>
+        function togglePassword() {
+            const passwordInput = document.getElementById('passwordInput');
+            const toggleButton = document.querySelector('.password-toggle');
+
+            if (passwordInput.type === 'password') {
+                passwordInput.type = 'text';
+                toggleButton.textContent = '👁️‍🗨️';
+            } else {
+                passwordInput.type = 'password';
+                toggleButton.textContent = '👁️';
+            }
+        }
+
+        function simulateLogin() {
+            const button = document.querySelector('.login-button');
+            const originalText = button.textContent;
+
+            // 模拟加载状态
+            button.textContent = '登录中...';
+            button.disabled = true;
+
+            // 2秒后恢复
+            setTimeout(() => {
+                button.textContent = originalText;
+                button.disabled = false;
+
+                // 模拟登录成功
+                alert('登录成功！将跳转到管理后台');
+            }, 2000);
+        }
+
+        // 页面加载后自动聚焦用户名输入框
+        document.addEventListener('DOMContentLoaded', function() {
+            const usernameInput = document.querySelector('.form-input[type="text"]');
+            usernameInput.focus();
+            usernameInput.select();
+        });
+    </script>
+</body>
+</html>
